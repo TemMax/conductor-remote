@@ -150,6 +150,7 @@ export const routes = {
 	/** Restore the original chat by its workspace/session deep link. */
 	restoreChat: param('POST', '/api/sessions/:sessionId/restore'),
 	sendPrompt: param('POST', '/api/sessions/:sessionId/prompt'),
+	answerQuestions: param('POST', '/api/sessions/:sessionId/questions/answer'),
 	/** Write a phone-selected file into Conductor's attachment layout for this chat's workspace. */
 	uploadAttachment: param('POST', '/api/sessions/:sessionId/attachments'),
 	/** Copy a chat into a fresh tab beside it, as a Conductor attachment (src/files/attachments.ts). */

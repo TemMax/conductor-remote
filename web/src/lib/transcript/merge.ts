@@ -22,6 +22,14 @@ export function mergeEntries(
 	prev: readonly TranscriptEntry[],
 	incoming: readonly TranscriptEntry[]
 ): TranscriptEntry[] {
+	const questionIds = new Set(prev.filter(e => e.question).map(e => `${e.question?.provider}:${e.question?.id}`))
+	incoming = incoming.filter(e => {
+		if (!e.question) return true
+		const key = `${e.question.provider}:${e.question.id}`
+		if (questionIds.has(key)) return false
+		questionIds.add(key)
+		return true
+	})
 	const results = incoming.filter(e => isToolResult(e) && e.toolUseId)
 	if (!results.length) return [...prev, ...incoming]
 

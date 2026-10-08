@@ -3,6 +3,10 @@
 A phone control panel for your local Conductor agents on macOS: watch every workspace, read
 live transcripts, review diffs and send prompts from your phone, over your tailnet.
 
+Claude and Codex interactive questions appear as cards in the chat. Choose options or write
+your own answers, then submit the whole set together. Answering in Conductor or Remote closes
+the card and preserves it in the transcript.
+
 Two parts:
 
 - **The relay** (`crates/relay`, Rust) runs on the Mac next to Conductor. It reads Conductor's

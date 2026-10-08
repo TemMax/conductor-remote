@@ -15,6 +15,7 @@ import { ChatActions } from './ChatActions.tsx'
 import { NodeEntry, PendingEntry, QueuedEntry, StepGroup, SubagentResult, subagentFinal } from './entries.tsx'
 import { groupSteps, rowKey } from './grouping.ts'
 import { MessageNav } from './MessageNav.tsx'
+import { QuestionCard } from './QuestionCard.tsx'
 import { TranscriptHistory } from './TranscriptHistory.tsx'
 import type { SplitFormat } from './types.ts'
 
@@ -73,7 +74,7 @@ export function Transcript({
 	/** Native children share this session; selection addresses their durable tool call instead. */
 	onSelectSubagent?: (toolUseId: string | null) => void
 }) {
-	const { entries, loading, error } = useTranscript(sessionId, poll ?? true)
+	const { entries, pendingQuestion, loading, error } = useTranscript(sessionId, poll ?? true)
 	const pending = useApp(s => s.pending)
 	const removePending = useApp(s => s.removePending)
 	const sendPrompt = useSendPrompt()
@@ -256,7 +257,22 @@ export function Transcript({
 									<StepGroup key={row.key} nodes={row.nodes} />
 								) : (
 									<Fragment key={row.key}>
-										<NodeEntry node={row.node} onSelectSubagent={onSelectSubagent} />
+										{row.node.e.question ? (
+											<QuestionCard
+												request={row.node.e.question}
+												sessionId={sessionId}
+												workspaceId={workspaceId}
+												active={
+													!error &&
+													poll !== false &&
+													pendingQuestion?.id === row.node.e.question.id &&
+													pendingQuestion.provider === row.node.e.question.provider
+												}
+												output={row.node.e.output}
+											/>
+										) : (
+											<NodeEntry node={row.node} onSelectSubagent={onSelectSubagent} />
+										)}
 										{!showingSubagent && inlineActions.has(rowKey(row.node.e)) ? (
 											<ChatActions
 												text={row.node.e.text}

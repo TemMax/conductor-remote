@@ -5,6 +5,7 @@ mod entry;
 pub mod images;
 mod js;
 mod parser;
+pub mod questions;
 pub mod render;
 
 pub use entry::{StoredMessage, StoredOutboxMessage, TranscriptEntry, TranscriptRole};

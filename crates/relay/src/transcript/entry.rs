@@ -47,6 +47,8 @@ pub struct TranscriptEntry {
     /// Tool name; set on a tool call and absent on a tool result.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<super::questions::QuestionRequest>,
     /// The primary input of a tool call (command, path, pattern and the like), unclipped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,

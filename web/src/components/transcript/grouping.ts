@@ -24,7 +24,7 @@ export function groupSteps(nodes: TranscriptNode[]): Row[] {
 	for (const node of nodes) {
 		// An Agent call is already a named doorway to its child subtab. Folding that into
 		// an opaque "N steps" disclosure would hide the feature.
-		if (!node.e.subagentLabel && (node.e.role === 'tool' || node.e.role === 'thinking')) {
+		if (!node.e.question && !node.e.subagentLabel && (node.e.role === 'tool' || node.e.role === 'thinking')) {
 			run.push(node)
 			continue
 		}

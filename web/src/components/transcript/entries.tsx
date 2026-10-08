@@ -9,6 +9,7 @@ import { UnlockLink } from '../ui.tsx'
 import { Bubble, Label } from './Bubble.tsx'
 import { rowKey } from './grouping.ts'
 import { Markdown } from './Markdown.tsx'
+import { QuestionCard } from './QuestionCard.tsx'
 import { QueueBubble } from './QueueBubble.tsx'
 import { ToolEntry } from './ToolEntry.tsx'
 
@@ -56,6 +57,10 @@ export function NodeEntry({
 	node: TranscriptNode
 	onSelectSubagent?: (toolUseId: string | null) => void
 }) {
+	if (node.e.question)
+		return (
+			<QuestionCard request={node.e.question} sessionId={null} workspaceId="" active={false} output={node.e.output} />
+		)
 	const toolUseId = node.e.toolUseId
 	return node.e.subagentLabel ? (
 		<SubagentEntry node={node} onOpen={toolUseId && onSelectSubagent ? () => onSelectSubagent(toolUseId) : undefined} />

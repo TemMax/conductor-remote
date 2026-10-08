@@ -42,7 +42,10 @@ import type { DevServerForward, DevServerResult, DevServerState } from './types/
 import type { LogEntry, LogFileInfo } from './types/logbuf.ts'
 import type { NoSleepState } from './types/nosleep.ts'
 import type { DeviceInfo } from './types/notify.ts'
-import type { TranscriptEntry } from './types/parser.ts'
+import type { QuestionRequest, TranscriptEntry } from './types/parser.ts'
+
+export type { QuestionAnswer, QuestionRequest } from './types/parser.ts'
+
 import type {
 	PlanUsageBucket,
 	PlanUsageProviderId,
@@ -215,6 +218,7 @@ export type { ClosedSession }
 
 /** GET /api/sessions/:id/messages?after= — `cursor` feeds the next poll. */
 export interface MessagesResponse {
+	pendingQuestion?: QuestionRequest
 	/** Newly persisted transcript rows after the requested rowid cursor. */
 	entries: TranscriptEntry[]
 	/** Full current snapshot of Conductor's queue-mode message outbox. */

@@ -27,6 +27,7 @@ const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 /// The `POST` write routes, by their path.
 enum Target {
     Prompt(String),
+    Questions(String),
     Stop(String),
     NewChat(String),
     Merge(String),
@@ -47,6 +48,9 @@ impl Target {
         }
         match_param(path, "/api/sessions/", "/prompt")
             .map(Target::Prompt)
+            .or_else(|| {
+                match_param(path, "/api/sessions/", "/questions/answer").map(Target::Questions)
+            })
             .or_else(|| match_param(path, "/api/sessions/", "/stop").map(Target::Stop))
             .or_else(|| match_param(path, "/api/workspaces/", "/sessions").map(Target::NewChat))
             .or_else(|| match_param(path, "/api/workspaces/", "/merge").map(Target::Merge))
@@ -158,6 +162,29 @@ pub async fn route(
     let priority = priority_of(headers);
 
     let answer = match target {
+        Target::Questions(session_id) => {
+            let request: crate::delivery::questions::AnswerQuestionsRequest =
+                match serde_json::from_slice(&body) {
+                    Ok(request) => request,
+                    Err(_) => {
+                        return Some(failure(
+                            StatusCode::BAD_REQUEST,
+                            "Invalid question answer request",
+                        ))
+                    }
+                };
+            if request.workspace_id.trim().is_empty()
+                || request.request_id.trim().is_empty()
+                || request.request_id.len() > 16_384
+                || request.answers.len() > 16
+            {
+                return Some(failure(
+                    StatusCode::BAD_REQUEST,
+                    "Invalid question answer request",
+                ));
+            }
+            writes.answer_questions(session_id, request, priority).await
+        }
         Target::Prompt(session_id) => {
             let request = match prompt_request(session_id, headers, &body, priority) {
                 Ok(request) => request,

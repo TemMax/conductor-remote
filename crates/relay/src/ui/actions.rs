@@ -10,6 +10,8 @@
 //! and an `AXStaticText` whose value is the displayed branch (usually without its owner prefix).
 //! The branch is in no pop-up's label.
 
+mod questions;
+
 use std::collections::VecDeque;
 use std::time::Duration;
 
@@ -75,6 +77,16 @@ impl<D: Desktop> Driver<D> {
 }
 
 impl<D: Desktop> UiDriver for Driver<D> {
+    fn answer_questions(
+        &mut self,
+        target: &Target,
+        request: &crate::transcript::questions::QuestionRequest,
+        answers: &[crate::transcript::questions::QuestionAnswer],
+        guard: &dyn Fn() -> bool,
+    ) -> Result<(), UiError> {
+        questions::answer(&self.desktop, target, request, answers, guard)
+    }
+
     fn trusted(&self) -> bool {
         self.desktop.trusted()
     }
