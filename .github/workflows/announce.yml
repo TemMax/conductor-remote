@@ -1,0 +1,36 @@
+name: Announce release
+
+# Run after verifying the live update. Rerunning sends another announcement.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published tag to announce, e.g. v0.1.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-announcement
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    if: github.repository == 'TemMax/conductor-remote' && github.ref == 'refs/heads/main'
+    name: Announce on Telegram
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: bash scripts/check-public-files.sh
+      - name: Post release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TAG: ${{ inputs.tag }}
+        run: python3 scripts/telegram-announce.py "$TAG"
