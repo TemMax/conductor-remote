@@ -7,7 +7,7 @@
 //! of the New workspace dialog, which belongs to no workspace yet, the other. In the live
 //! window the main pane (`AXGroup`/`AXLandmarkMain`) names the open workspace in two of its
 //! direct children: an `AXPopUpButton` whose label is the repository name twice ("relay relay"),
-//! and an `AXStaticText` whose value is the tail of the branch (the part after the last `/`).
+//! and an `AXStaticText` whose value is the displayed branch (usually without its owner prefix).
 //! The branch is in no pop-up's label.
 
 use std::collections::VecDeque;
@@ -214,9 +214,15 @@ fn normalize(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-/// Whether a composer value holds `wanted` (already normalized).
+/// Whether AXValue holds `wanted` (already normalized). Conductor's WebKit composer
+/// exposes paragraph breaks as two newlines, even when the editor contains one.
+/// Match that representation as well without changing the text written or its receipt.
 fn holds(value: Option<String>, wanted: &str) -> bool {
-    value.is_some_and(|value| normalize(&value).contains(wanted))
+    value.is_some_and(|value| {
+        let value = normalize(&value);
+        value.contains(wanted)
+            || (wanted.contains('\n') && value.contains(&wanted.replace('\n', "\n\n")))
+    })
 }
 
 fn non_empty(value: &Option<String>) -> Option<&str> {
@@ -300,14 +306,19 @@ fn pane_header<N: UiNode>(pane: &N) -> Option<String> {
         .and_then(|header| header.label())
 }
 
-/// Whether one of the pane's direct children is an `AXStaticText` whose trimmed value equals
-/// `branch` or its tail. A value that fails to read counts as none.
+/// Whether a direct `AXStaticText` shows the branch, its tail, or the branch without its
+/// owner prefix (Conductor's display for nested branch names). Failed reads count as none.
 fn shows_branch<N: UiNode>(pane: &N, target: &Target) -> bool {
     pane.children().unwrap_or_default().iter().any(|child| {
         has_role(child, "AXStaticText")
             && child.value().ok().flatten().is_some_and(|value| {
                 let value = value.trim();
-                value == target.branch_tail() || value == target.branch
+                value == target.branch_tail()
+                    || value == target.branch
+                    || target
+                        .branch
+                        .split_once('/')
+                        .is_some_and(|(_, remainder)| value == remainder)
             })
     })
 }

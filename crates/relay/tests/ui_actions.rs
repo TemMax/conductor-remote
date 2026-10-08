@@ -12,6 +12,7 @@ use conductor_remote::ui::fake::{
     conductor_app, main_pane, show_workspace, FakeDesktop, FakeEvent, FakeNode, WindowSpec,
 };
 use conductor_remote::ui::keys::{Key, Modifiers};
+use conductor_remote::ui::node::UiNode;
 use conductor_remote::ui::screen::SessionState;
 
 const COMPOSER: &str = "Ask to make changes, @mention files, run /commands";
@@ -208,6 +209,52 @@ fn send_types_into_the_selected_chat_and_presses_return() {
         .events()
         .contains(&FakeEvent::Pause(Duration::from_millis(250))));
     assert_eq!(setup.area.value_text(), Some(String::new()));
+}
+
+#[test]
+fn send_accepts_a_nested_branch_without_its_owner_prefix() {
+    let mut setup = Setup::new(&spec());
+    let app = setup.app.clone();
+    setup.desktop().on_open_url(move |_| {
+        show_workspace(&app, "relay", "owner/topic/feature-x");
+        main_pane(&app)
+            .children()
+            .unwrap()
+            .into_iter()
+            .find(|node| node.role().as_deref() == Some("AXStaticText"))
+            .unwrap()
+            .set_value_text(Some("topic/feature-x"));
+    });
+    setup.return_empties_composer();
+    let mut destination = target();
+    destination.branch = "owner/topic/feature-x".to_owned();
+    assert_eq!(setup.driver.send_prompt(&destination, PROMPT, false), Ok(1));
+    assert_eq!(setup.keys(), vec![(Key::Return, plain())]);
+}
+
+#[test]
+fn send_refuses_other_nested_branches_with_a_shared_tail() {
+    for shown in ["unrelated/feature-x", "topic/feature-x-old"] {
+        let mut setup = Setup::new(&spec());
+        let app = setup.app.clone();
+        setup.desktop().on_open_url(move |_| {
+            show_workspace(&app, "relay", "owner/topic/feature-x");
+            main_pane(&app)
+                .children()
+                .unwrap()
+                .into_iter()
+                .find(|node| node.role().as_deref() == Some("AXStaticText"))
+                .unwrap()
+                .set_value_text(Some(shown));
+        });
+        let mut destination = target();
+        destination.branch = "owner/topic/feature-x".to_owned();
+        assert_eq!(
+            setup.driver.send_prompt(&destination, PROMPT, false),
+            Err(not_focused())
+        );
+        setup.assert_untouched_composer();
+    }
 }
 
 #[test]
@@ -535,6 +582,54 @@ fn send_compares_line_endings_loosely() {
             .send_prompt(&target(), "one\r\ntwo\rthree", false),
         Ok(1)
     );
+}
+
+#[test]
+fn send_accepts_doubled_ax_paragraph_breaks_without_changing_the_prompt() {
+    for prompt in ["one\ntwo\nthree", "one\n\ntwo", "один\nдва"] {
+        let mut setup = Setup::working(&spec());
+        setup.area.on_set_value(|area, text| {
+            area.set_value_text(Some(&text.replace('\n', "\n\n")));
+        });
+        assert_eq!(setup.driver.send_prompt(&target(), prompt, false), Ok(1));
+        assert_eq!(setup.keys(), vec![(Key::Return, plain())]);
+        let writes: Vec<_> = setup
+            .actions()
+            .into_iter()
+            .filter(|event| matches!(event, FakeEvent::SetValue { .. }))
+            .collect();
+        assert_eq!(writes, vec![set_value(prompt)]);
+    }
+}
+
+#[test]
+fn send_does_not_count_doubled_ax_paragraph_breaks_as_submission() {
+    let mut setup = Setup::new(&spec());
+    setup.land_on_open_url();
+    setup.area.on_set_value(|area, text| {
+        area.set_value_text(Some(&text.replace('\n', "\n\n")));
+    });
+    assert_eq!(
+        setup.driver.send_prompt(&target(), "one\ntwo", false),
+        Err(UiError::StillInComposer)
+    );
+    assert_eq!(setup.keys(), vec![(Key::Return, plain()); 2]);
+}
+
+#[test]
+fn send_rejects_changed_text_despite_doubled_ax_paragraph_breaks() {
+    let mut setup = Setup::working(&spec());
+    setup.area.on_set_value(|area, text| {
+        if !text.is_empty() {
+            area.set_value_text(Some("one\n\nwrong"));
+        }
+    });
+    assert_eq!(
+        setup.driver.send_prompt(&target(), "one\ntwo", false),
+        Err(UiError::ComposerRejected)
+    );
+    assert!(setup.keys().is_empty());
+    assert_eq!(setup.area.value_text(), Some(String::new()));
 }
 
 // ---- failures before the window ----
