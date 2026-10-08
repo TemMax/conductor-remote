@@ -1,0 +1,15 @@
+{
+	"id": "ws-pinned",
+	"workspace_name": "Lamp oil",
+	"pr_title": "Add lamp oil",
+	"branch": "feat/lamp-oil",
+	"directory_name": "attic",
+	"state": "ready",
+	"updated_at": "2026-01-11T12:00:00.000Z",
+	"repo_name": "lantern",
+	"icon": {
+		"kind": "emoji",
+		"value": "🏮"
+	},
+	"archived": false
+}

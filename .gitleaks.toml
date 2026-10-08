@@ -1,0 +1,33 @@
+title = "Conductor Remote public source"
+
+[extend]
+useDefault = true
+
+# Each exception requires both this exact value and its reviewed source file.
+[[allowlists]]
+description = "The app's public Sparkle verification key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)app/project\.yml$''']
+regexes = ['''^BpCpbnqRYtkTVEMmLbSuJlfwrB9qLn02YiBFzh12OEM=$''']
+
+[[allowlists]]
+description = "Synthetic relay token used only in settings tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)app/Tests/ConductorRemoteKitTests/RelaySettingsTests\.swift$''']
+regexes = ['''^0123456789abcdef0123456789abcdef$''']
+
+[[allowlists]]
+description = "Synthetic token used to verify log redaction"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)crates/relay/tests/host_logbuf\.rs$''']
+regexes = ['''^tok3n-ABCdef123$''']
+
+[[allowlists]]
+description = "Published RFC 8291 authentication-secret test vector"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)crates/relay/tests/notify_webpush\.rs$''']
+regexes = ['''^BTBZMqHH6r4Tts7J_aSIgg$''']

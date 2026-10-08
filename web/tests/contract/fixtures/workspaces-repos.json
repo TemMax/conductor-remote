@@ -1,0 +1,58 @@
+[
+	{
+		"name": "relic",
+		"root_path": "/ROOT/_repos/relic",
+		"default_branch": "main",
+		"icon": null
+	},
+	{
+		"name": "compass",
+		"root_path": null,
+		"default_branch": "develop",
+		"icon": {
+			"kind": "named",
+			"value": "book"
+		}
+	},
+	{
+		"name": "anvil",
+		"root_path": "/ROOT/_repos/anvil",
+		"default_branch": "trunk",
+		"icon": {
+			"kind": "file"
+		}
+	},
+	{
+		"name": "lantern",
+		"root_path": "/ROOT/_repos/lantern",
+		"default_branch": "main",
+		"icon": {
+			"kind": "emoji",
+			"value": "🏮"
+		}
+	},
+	{
+		"name": "quartz",
+		"root_path": "/ROOT/_repos/quartz",
+		"default_branch": null,
+		"icon": {
+			"kind": "github",
+			"owner": "quartz-labs"
+		}
+	},
+	{
+		"name": "hollow",
+		"root_path": "/ROOT/_repos/hollow",
+		"default_branch": "main",
+		"icon": {
+			"kind": "github",
+			"owner": "hollow-org"
+		}
+	},
+	{
+		"name": "plain",
+		"root_path": null,
+		"default_branch": "main",
+		"icon": null
+	}
+]

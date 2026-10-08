@@ -1,0 +1,50 @@
+[
+	{
+		"id": "ses-closed-space",
+		"title": "Closed, space format",
+		"model": "ses-model-opus",
+		"agent_type": "claude",
+		"created_at": "2026-09-05 09:00:00",
+		"updated_at": "2026-09-10 13:00:00"
+	},
+	{
+		"id": "ses-closed-iso",
+		"title": "Closed, ISO format",
+		"model": "ses-model-codex",
+		"agent_type": "codex",
+		"created_at": "2026-09-05 08:00:00",
+		"updated_at": "2026-09-10T12:00:00.000Z"
+	},
+	{
+		"id": "ses-closed-tie-c",
+		"title": "Tie, created last",
+		"model": null,
+		"agent_type": "claude",
+		"created_at": "2026-09-05 11:00:00",
+		"updated_at": "2026-09-09 10:00:00"
+	},
+	{
+		"id": "ses-closed-tie-a",
+		"title": "Tie, same creation",
+		"model": null,
+		"agent_type": "claude",
+		"created_at": "2026-09-05 10:00:00",
+		"updated_at": "2026-09-09 10:00:00"
+	},
+	{
+		"id": "ses-closed-tie-b",
+		"title": null,
+		"model": null,
+		"agent_type": "cursor",
+		"created_at": "2026-09-05 10:00:00",
+		"updated_at": "2026-09-09 10:00:00"
+	},
+	{
+		"id": "ses-closed-old",
+		"title": "Closed long ago",
+		"model": null,
+		"agent_type": null,
+		"created_at": "2026-08-01 08:00:00",
+		"updated_at": "2026-08-01 09:00:00"
+	}
+]

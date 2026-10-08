@@ -1,0 +1,51 @@
+name: Conductor Remote
+options:
+  bundleIdPrefix: com.temmax
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  ConductorRemoteKit:
+    path: .
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: "2.10.0"
+targets:
+  Conductor Remote:
+    type: application
+    platform: macOS
+    sources:
+      - App/Sources
+      - App/Resources
+    dependencies:
+      - package: ConductorRemoteKit
+      - package: Sparkle
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: Conductor Remote
+        CFBundleDisplayName: Conductor Remote
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSUIElement: true
+        NSHumanReadableCopyright: ""
+        SUFeedURL: https://github.com/TemMax/conductor-remote/releases/latest/download/appcast.xml
+        SUPublicEDKey: "BpCpbnqRYtkTVEMmLbSuJlfwrB9qLn02YiBFzh12OEM="
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: true
+        SUScheduledCheckInterval: 86400
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.temmax.conductor-remote
+        PRODUCT_NAME: Conductor Remote
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        ARCHS: arm64
+        CODE_SIGN_ENTITLEMENTS: App/ConductorRemote.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: 0.1.1
+        CURRENT_PROJECT_VERSION: 2
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          CURRENT_PROJECT_VERSION: 2147483647

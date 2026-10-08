@@ -1,0 +1,7 @@
+{
+	"totalTokens": 9000,
+	"usedPercent": 7.5,
+	"compacted": true,
+	"categories": { "initial": 8865, "chat": 57, "thinking": 18, "tools": 60 },
+	"forkTokens": { "concise": 125, "reasoning": 138, "full": 177 }
+}

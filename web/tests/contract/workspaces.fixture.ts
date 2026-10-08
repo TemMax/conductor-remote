@@ -1,0 +1,270 @@
+import type { RepoRow, SearchWorkspace, Workspace } from '../../src/contract/types/reads-types.ts'
+
+/** What `Reads::list_workspaces` returns for the seed of `crates/relay/tests/support/seed_workspaces.rs`. */
+export const workspacesState: Workspace[] = [
+	{
+		id: 'ws-pinned',
+		directory_name: 'attic',
+		workspace_name: 'Lamp oil',
+		branch: 'feat/lamp-oil',
+		pr_title: 'Add lamp oil',
+		derived_status: 'in-progress',
+		manual_status: null,
+		state: 'ready',
+		created_at: '2026-01-10 12:00:00',
+		updated_at: '2026-01-11T12:00:00.000Z',
+		pinned_at: '2026-02-01T09:00:00.000Z',
+		active_session_id: 'ws-sess-working',
+		intended_target_branch: 'release/2',
+		repo_name: 'lantern',
+		repo_root: '/ROOT/_repos/lantern',
+		repo_icon: 'emoji:🏮',
+		remote_url: 'https://github.com/lantern-works/lantern.git',
+		default_branch: 'main',
+		session_status: 'working',
+		session_title: 'Refill the lamps',
+		model: 'sonnet',
+		agent_type: 'claude',
+		unread_sessions: [],
+		worktree: '/ROOT/lantern/attic',
+		baseBranch: 'release/2',
+		icon: {
+			kind: 'emoji',
+			value: '🏮'
+		},
+		change_stats: null,
+		pr_status: null,
+		pr_number: null,
+		pr_url: null,
+		run_active: false
+	},
+	{
+		id: 'ws-iso',
+		directory_name: 'forge',
+		workspace_name: null,
+		branch: 'fix/hammer',
+		pr_title: 'Fix the hammer',
+		derived_status: 'in-progress',
+		manual_status: 'review',
+		state: 'ready',
+		created_at: '2026-03-01 00:00:00',
+		updated_at: '2026-03-05T01:00:00.000Z',
+		pinned_at: null,
+		active_session_id: 'ws-sess-codex',
+		intended_target_branch: null,
+		repo_name: 'anvil',
+		repo_root: '/ROOT/_repos/anvil',
+		repo_icon: null,
+		remote_url: 'https://github.com/anvil-co/anvil',
+		default_branch: 'trunk',
+		session_status: 'idle',
+		session_title: 'Hammer repair',
+		model: 'gpt-5',
+		agent_type: 'codex',
+		unread_sessions: [],
+		worktree: '/ROOT/anvil/forge',
+		baseBranch: 'trunk',
+		icon: {
+			kind: 'file'
+		},
+		change_stats: null,
+		pr_status: null,
+		pr_number: null,
+		pr_url: null,
+		run_active: false
+	},
+	{
+		id: 'ws-space',
+		directory_name: 'needle',
+		workspace_name: 'Needle',
+		branch: 'needle-work',
+		pr_title: null,
+		derived_status: 'in-progress',
+		manual_status: null,
+		state: 'ready',
+		created_at: '2026-03-02 00:00:00',
+		updated_at: '2026-03-05 23:00:00',
+		pinned_at: null,
+		active_session_id: null,
+		intended_target_branch: '',
+		repo_name: 'compass',
+		repo_root: null,
+		repo_icon: 'book',
+		remote_url: null,
+		default_branch: 'develop',
+		session_status: null,
+		session_title: null,
+		model: null,
+		agent_type: null,
+		unread_sessions: [],
+		worktree: null,
+		baseBranch: 'develop',
+		icon: {
+			kind: 'named',
+			value: 'book'
+		},
+		change_stats: null,
+		pr_status: null,
+		pr_number: null,
+		pr_url: null,
+		run_active: false
+	},
+	{
+		id: 'ws-unread',
+		directory_name: 'cellar',
+		workspace_name: 'Cellar',
+		branch: 'cellar-fix',
+		pr_title: null,
+		derived_status: null,
+		manual_status: null,
+		state: 'ready',
+		created_at: '2026-02-25 00:00:00',
+		updated_at: '2026-03-01 00:00:00',
+		pinned_at: null,
+		active_session_id: null,
+		intended_target_branch: null,
+		repo_name: 'lantern',
+		repo_root: '/ROOT/_repos/lantern',
+		repo_icon: 'emoji:🏮',
+		remote_url: 'https://github.com/lantern-works/lantern.git',
+		default_branch: 'main',
+		session_status: null,
+		session_title: null,
+		model: null,
+		agent_type: null,
+		unread_sessions: [
+			{
+				id: 'ws-sess-unread-a',
+				at: '2026-03-02 09:00:00'
+			},
+			{
+				id: 'ws-sess-unread-b',
+				at: '2026-03-02T09:30:00.000Z'
+			}
+		],
+		worktree: null,
+		baseBranch: 'main',
+		icon: {
+			kind: 'emoji',
+			value: '🏮'
+		},
+		change_stats: null,
+		pr_status: null,
+		pr_number: null,
+		pr_url: null,
+		run_active: false
+	},
+	{
+		id: 'ws-setting-up',
+		directory_name: 'geode',
+		workspace_name: null,
+		branch: null,
+		pr_title: null,
+		derived_status: 'in-progress',
+		manual_status: null,
+		state: 'setting_up',
+		created_at: '2026-02-20 09:00:00',
+		updated_at: '2026-02-20 10:00:00',
+		pinned_at: null,
+		active_session_id: null,
+		intended_target_branch: null,
+		repo_name: 'quartz',
+		repo_root: '/ROOT/_repos/quartz',
+		repo_icon: null,
+		remote_url: 'git@github.com:quartz-labs/quartz.git',
+		default_branch: null,
+		session_status: null,
+		session_title: null,
+		model: null,
+		agent_type: null,
+		unread_sessions: [],
+		worktree: null,
+		baseBranch: 'main',
+		icon: {
+			kind: 'github',
+			owner: 'quartz-labs'
+		},
+		change_stats: null,
+		pr_status: null,
+		pr_number: null,
+		pr_url: null,
+		run_active: false
+	}
+]
+
+/** What `Reads::list_repos` returns for the same seed. */
+export const workspacesRepos: RepoRow[] = [
+	{
+		name: 'relic',
+		root_path: '/ROOT/_repos/relic',
+		default_branch: 'main',
+		icon: null
+	},
+	{
+		name: 'compass',
+		root_path: null,
+		default_branch: 'develop',
+		icon: {
+			kind: 'named',
+			value: 'book'
+		}
+	},
+	{
+		name: 'anvil',
+		root_path: '/ROOT/_repos/anvil',
+		default_branch: 'trunk',
+		icon: {
+			kind: 'file'
+		}
+	},
+	{
+		name: 'lantern',
+		root_path: '/ROOT/_repos/lantern',
+		default_branch: 'main',
+		icon: {
+			kind: 'emoji',
+			value: '🏮'
+		}
+	},
+	{
+		name: 'quartz',
+		root_path: '/ROOT/_repos/quartz',
+		default_branch: null,
+		icon: {
+			kind: 'github',
+			owner: 'quartz-labs'
+		}
+	},
+	{
+		name: 'hollow',
+		root_path: '/ROOT/_repos/hollow',
+		default_branch: 'main',
+		icon: {
+			kind: 'github',
+			owner: 'hollow-org'
+		}
+	},
+	{
+		name: 'plain',
+		root_path: null,
+		default_branch: 'main',
+		icon: null
+	}
+]
+
+/** What `Reads::get_any_workspace("ws-pinned")` returns for the same seed. */
+export const workspacesAny: SearchWorkspace = {
+	id: 'ws-pinned',
+	workspace_name: 'Lamp oil',
+	pr_title: 'Add lamp oil',
+	branch: 'feat/lamp-oil',
+	directory_name: 'attic',
+	state: 'ready',
+	updated_at: '2026-01-11T12:00:00.000Z',
+	repo_name: 'lantern',
+	icon: {
+		kind: 'emoji',
+		value: '🏮'
+	},
+	archived: false
+}

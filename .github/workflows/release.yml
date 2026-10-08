@@ -1,0 +1,349 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Create the GitHub release; otherwise the artifacts are uploaded to the run
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Public file policy
+        run: bash scripts/check-public-files.sh
+
+      # Every release build must be on main's history before any signing secret is used.
+      - name: Tag and publishing
+        id: ref
+        env:
+          PUBLISH_INPUT: ${{ inputs.publish }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag=$GITHUB_REF_NAME
+          else
+            # The `version` of the [workspace.package] table.
+            version=$(awk '
+              /^\[/ { in_table = ($0 ~ /^\[workspace\.package\][[:space:]]*$/); next }
+              in_table && /^[[:space:]]*version[[:space:]]*=/ {
+                v = $0
+                sub(/^[^=]*=[[:space:]]*/, "", v)
+                sub(/[[:space:]]*(#.*)?$/, "", v)
+                gsub(/"/, "", v)
+                print v
+                exit
+              }
+            ' Cargo.toml)
+            if [ -z "$version" ]; then
+              echo "::error::no version found in the [workspace.package] table of Cargo.toml"
+              exit 1
+            fi
+            tag="v$version"
+          fi
+
+          publish=false
+          if [ "$GITHUB_EVENT_NAME" = push ] || [ "$PUBLISH_INPUT" = true ]; then
+            publish=true
+          fi
+          if [ "$publish" = true ]; then
+            if [ "$GITHUB_REF_TYPE" != tag ]; then
+              echo "::error::publishing needs a run on a tag; this run is on the branch $GITHUB_REF_NAME"
+              exit 1
+            fi
+          fi
+          commit=$(git rev-parse 'HEAD^{commit}')
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "::error::release builds require a commit on origin/main"
+            exit 1
+          fi
+
+          echo "tag=$tag, publish=$publish"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Require Xcode 26
+          # sed -n 1p, not head: head exits early and pipefail turns the writer's SIGPIPE into a failure
+        run: |
+          xcode=$(xcodebuild -version | sed -n 1p)
+          echo "$xcode"
+          case "$xcode" in
+          "Xcode 26" | "Xcode 26."*) ;;
+          *)
+            echo "::error::the release needs Xcode 26, the runner has '$xcode'"
+            exit 1
+            ;;
+          esac
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install XcodeGen 2.46.0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          echo "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+
+      # rustup installs the toolchain pinned in rust-toolchain.toml.
+      - name: Rust toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+
+      - name: Versions
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.ref.outputs.tag }}
+        run: |
+          # The build number of the latest release, when there is one with an appcast.
+          previous=""
+          if latest=$(gh release view --json tagName,assets 2>"$RUNNER_TEMP/gh-release.err"); then
+            if jq -e 'any(.assets[]; .name == "appcast.xml")' <<<"$latest" >/dev/null; then
+              latest_tag=$(jq -r '.tagName' <<<"$latest")
+              mkdir -p "$RUNNER_TEMP/previous"
+              gh release download "$latest_tag" --pattern appcast.xml --dir "$RUNNER_TEMP/previous" --clobber
+              previous=$(xmllint --xpath 'string(//*[local-name()="version" and namespace-uri()="http://www.andymatuschak.org/xml-namespaces/sparkle"])' "$RUNNER_TEMP/previous/appcast.xml")
+              if ! [[ "$previous" =~ ^[0-9]+$ ]]; then
+                echo "::error::the appcast of $latest_tag has no numeric sparkle:version"
+                exit 1
+              fi
+              echo "the latest release is $latest_tag, build $previous"
+            else
+              echo "the latest release has no appcast.xml; no previous build"
+            fi
+          elif grep -qi 'release not found' "$RUNNER_TEMP/gh-release.err"; then
+            echo "no release yet; no previous build"
+          else
+            cat "$RUNNER_TEMP/gh-release.err" >&2
+            exit 1
+          fi
+
+          if [ -n "$previous" ]; then
+            result=$(bash scripts/check-release-version.sh "$TAG" --previous-build "$previous")
+          else
+            result=$(bash scripts/check-release-version.sh "$TAG")
+          fi
+          echo "$result"
+          echo "$result" >> "$GITHUB_OUTPUT"
+
+      - name: Sparkle tools
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/Sparkle-2.10.0.tar.xz" https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $RUNNER_TEMP/Sparkle-2.10.0.tar.xz" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/Sparkle-2.10.0.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          test -x "$RUNNER_TEMP/sparkle/bin/sign_update"
+
+      - name: Sparkle key
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::the secret SPARKLE_PRIVATE_KEY is not set"
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle-private-key"
+
+      - name: Import the certificate
+        id: signing
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          if [ -z "$BUILD_CERTIFICATE_BASE64" ]; then
+            echo "::error::the secret BUILD_CERTIFICATE_BASE64 is not set"
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          p12="$RUNNER_TEMP/certificate.p12"
+          # The keychain lives for this job only, so its password is random and not a secret.
+          keychain_password=$(openssl rand -hex 24)
+          echo "::add-mask::$keychain_password"
+
+          (umask 077 && printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$p12")
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+
+          # Prepend the keychain to the user search list.
+          existing=()
+          while IFS= read -r line; do
+            [ -n "$line" ] && existing+=("$line")
+          done < <(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//')
+          security list-keychains -d user -s "$keychain" ${existing[@]+"${existing[@]}"}
+
+          identity=$(security find-identity -v -p codesigning | sed -n 's/^[[:space:]]*[0-9]*) [0-9A-F]* "\(Developer ID Application: .*\)"$/\1/p' | sed -n 1p)
+          if [ -z "$identity" ]; then
+            echo "::error::the imported certificate holds no 'Developer ID Application' identity"
+            exit 1
+          fi
+          team_id=$(sed -n 's/.* (\([A-Z0-9]*\))$/\1/p' <<<"$identity")
+          signing_name=$(sed -e 's/^Developer ID Application: //' -e 's/ ([A-Z0-9]*)$//' <<<"$identity")
+          echo "::add-mask::$identity"
+          [ -z "$team_id" ] || echo "::add-mask::$team_id"
+          [ -z "$signing_name" ] || echo "::add-mask::$signing_name"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      - name: Build and sign the app
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          bash scripts/build-app.sh
+
+          plist="build/Conductor Remote.app/Contents/Info.plist"
+          app_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+          app_build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
+          if [ "$app_version" != "$VERSION" ] || [ "$app_build" != "$BUILD" ]; then
+            echo "::error::the built app is $app_version ($app_build), the release is $VERSION ($BUILD)"
+            exit 1
+          fi
+          echo "the built app is $app_version ($app_build)"
+
+      # The release stops here when the private key is not the one the app trusts.
+      - name: Check the Sparkle key
+        run: |
+          swift scripts/check-sparkle-key.swift "$RUNNER_TEMP/sparkle-private-key" "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' 'build/Conductor Remote.app/Contents/Info.plist')"
+
+      - name: Notarize the app
+        env:
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          if [ -z "$NOTARY_KEY_BASE64" ]; then
+            echo "::error::the secret NOTARY_KEY_BASE64 is not set"
+            exit 1
+          fi
+          app="build/Conductor Remote.app"
+          p8="$RUNNER_TEMP/notary-key.p8"
+          zip="$RUNNER_TEMP/notarize-app.zip"
+          result="$RUNNER_TEMP/notarize-app.json"
+          umask 077
+
+          (umask 077 && printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$p8")
+          ditto -c -k --keepParent "$app" "$zip"
+
+          xcrun notarytool submit "$zip" --key "$p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 30m --output-format json > "$result" 2> "$RUNNER_TEMP/notarize-app.err" || true
+          id=$(jq -r '.id // empty' "$result" 2>/dev/null || true)
+          status=$(jq -r '.status // empty' "$result" 2>/dev/null || true)
+          echo "notarization ${id:-<no id>}: ${status:-<no status>}"
+          if [ "$status" != Accepted ]; then
+            # Retrieve the detailed report privately with the submission id above.
+            echo "::error::the app was not notarized"
+            exit 1
+          fi
+
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+
+      - name: Build and notarize the DMG
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          mkdir -p build/release
+          bash scripts/make-dmg.sh "build/Conductor Remote.app" "$VERSION" build/release --identity "$IDENTITY"
+
+          dmg="build/release/Conductor-Remote-$VERSION.dmg"
+          p8="$RUNNER_TEMP/notary-key.p8"
+          result="$RUNNER_TEMP/notarize-dmg.json"
+          umask 077
+
+          xcrun notarytool submit "$dmg" --key "$p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 30m --output-format json > "$result" 2> "$RUNNER_TEMP/notarize-dmg.err" || true
+          id=$(jq -r '.id // empty' "$result" 2>/dev/null || true)
+          status=$(jq -r '.status // empty' "$result" 2>/dev/null || true)
+          echo "notarization ${id:-<no id>}: ${status:-<no status>}"
+          if [ "$status" != Accepted ]; then
+            # Retrieve the detailed report privately with the submission id above.
+            echo "::error::the DMG was not notarized"
+            exit 1
+          fi
+
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+
+      - name: Sign the update and write the appcast
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          sign_update="$RUNNER_TEMP/sparkle/bin/sign_update"
+          key="$RUNNER_TEMP/sparkle-private-key"
+          dmg="build/release/Conductor-Remote-$VERSION.dmg"
+
+          sig_attrs=$("$sign_update" --ed-key-file "$key" "$dmg")
+          signature=$(sed -n 's/^sparkle:edSignature="\([^"]*\)".*$/\1/p' <<<"$sig_attrs")
+          "$sign_update" --verify --ed-key-file "$key" "$dmg" "$signature"
+
+          bash scripts/make-appcast.sh "$VERSION" "$BUILD" \
+            "https://github.com/TemMax/conductor-remote/releases/download/$TAG/Conductor-Remote-$VERSION.dmg" \
+            "$sig_attrs" "docs/release-notes/$TAG.md" > build/release/appcast.xml
+          xmllint --noout build/release/appcast.xml
+
+          # Run inside the directory, so the file names carry no directory.
+          (cd build/release && shasum -a 256 "Conductor-Remote-$VERSION.dmg" appcast.xml > SHA256SUMS)
+          cat build/release/SHA256SUMS
+
+      - name: Publish the release
+        if: steps.ref.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.ref.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$TAG" --verify-tag --title "Conductor Remote $VERSION" \
+            --notes-file "docs/release-notes/$TAG.md" \
+            "build/release/Conductor-Remote-$VERSION.dmg" build/release/appcast.xml build/release/SHA256SUMS
+
+      - name: Upload the artifacts
+        if: steps.ref.outputs.publish != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: conductor-remote-${{ steps.version.outputs.version }}
+          path: build/release
+          if-no-files-found: error
+
+      - name: Remove the keychain and the key files
+        if: always()
+        run: |
+          # The keychain may never have been made.
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/notary-key.p8" "$RUNNER_TEMP/sparkle-private-key" \
+            "$RUNNER_TEMP/notarize-app.zip" "$RUNNER_TEMP/notarize-app.json" "$RUNNER_TEMP/notarize-app.err" \
+            "$RUNNER_TEMP/notarize-dmg.json" "$RUNNER_TEMP/notarize-dmg.err"

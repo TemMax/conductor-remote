@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+		<meta name="theme-color" content="#0a0b0e" />
+		<script>
+			// Keep the key and colors aligned with src/lib/theme.ts. This runs before the
+			// stylesheet so an explicit preference never flashes the opposite theme.
+			try {
+				const preference = localStorage.getItem('conductor-remote-theme')
+				if (preference === 'light' || preference === 'dark') document.documentElement.dataset.theme = preference
+				const dark =
+					preference === 'dark' ||
+					(preference !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+				document.querySelector('meta[name="theme-color"]').content = dark ? '#0a0b0e' : '#f5f6f8'
+			} catch {}
+		</script>
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<meta name="apple-mobile-web-app-title" content="Conductor" />
+		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+		<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+		<title>Conductor Remote</title>
+		<!-- Runs before the module bundle so it can catch a stale shell that fails to boot. -->
+		<script src="/self-heal.js"></script>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

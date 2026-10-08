@@ -1,0 +1,456 @@
+@import "tailwindcss";
+
+@theme {
+	/* `light-dark()` reads the root color-scheme. With no data-theme attribute that
+	   follows the device; an explicit Light or Dark choice pins it (lib/theme.ts). */
+	--color-bg: light-dark(#f5f6f8, #0a0b0e);
+	--color-surface: light-dark(#ffffff, #14161b);
+	--color-surface-2: light-dark(#eceef2, #1b1e26);
+	--color-border: light-dark(#d4d7de, #262a33);
+	--color-border-soft: light-dark(#e2e4e9, #1e222a);
+	--color-text: light-dark(#1c1e24, #e7e9ee);
+	--color-muted: light-dark(#626773, #8b909d);
+	--color-faint: light-dark(#9499a4, #5c616d);
+
+	--color-accent: light-dark(#6757d9, #8b7dff);
+	--color-accent-soft: light-dark(#ebe9ff, #2a2650);
+	--color-on-solid: light-dark(#ffffff, #101116);
+	--color-provider-openai: light-dark(#17191f, #ffffff);
+
+	--color-working: light-dark(#a65f00, #f5a623);
+	--color-idle: light-dark(#167a52, #3ecf8e);
+	--color-done: light-dark(#286bc0, #5b9dff);
+	/* Context composition is categorical, not status. Keep each stratum distinct
+	   from the neutral unused track and from the app's violet/blue controls. */
+	--color-context-initial: light-dark(#4b505c, #d7dae0);
+	--color-context-chat: light-dark(#a83fa3, #ed7ce2);
+	--color-context-tools: light-dark(#087f73, #35cdb8);
+	/* An inactive provider context whose cheap/fast prompt cache may have cooled. */
+	--color-cold-cache: light-dark(#90611f, #d6a85f);
+
+	/* Workspace dot by PR state (src/git/pr.ts). */
+	--color-pr-merged: light-dark(#7b38b5, #ac47ff);
+	--color-pr-draft: light-dark(#6e7075, #a4a3a2);
+	--color-pr-attention: light-dark(#916b00, #facc15);
+	--color-pr-mergeable: light-dark(#167b42, #49de80);
+
+	--color-add: light-dark(#14784f, #3ecf8e);
+	--color-del: light-dark(#c73c3c, #ff6b6b);
+
+	--font-sans: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+}
+
+@layer base {
+	* {
+		-webkit-tap-highlight-color: transparent;
+	}
+	html,
+	body,
+	#root {
+		/* height:100% resolves to the *safe* viewport on iOS standalone (it excludes
+		   the bottom home-indicator inset), so the app stopped where the phone's
+		   rounded corners begin. 100dvh fills the full screen — the resting default.
+		   useVisualViewportHeight sets --app-height ONLY while the software keyboard is
+		   up (dvh/vh ignore it), shrinking the column to sit above the keyboard; it
+		   clears the var on dismiss so 100dvh takes back over. Binding to the visual
+		   viewport at rest would re-shrink to the *safe* height (regressing #24), which
+		   is why the override is keyboard-gated, not permanent. */
+		height: var(--app-height, 100dvh);
+	}
+	/* The document itself must never scroll — every scroller in this app is an inner
+	   element. That isn't just tidiness: an installed iOS PWA lays the root element
+	   out in the *safe* box while viewport units resolve to the whole screen, so a
+	   full-height column overflows its own root by exactly the top inset and the page
+	   picks up that much phantom scroll. Dragging it slides the app off the top and
+	   opens a dead band at the bottom — the "I have to scroll up and down before it's
+	   full-screen" bug. Measured on iOS 26.5 (iPhone 17 Pro, 874pt screen): dvh 874,
+	   documentElement.clientHeight 812, scrollHeight 874. */
+	html,
+	body {
+		overflow: hidden;
+	}
+	/* Locking the overflow alone isn't enough: with nothing overflowing, WebKit falls
+	   back to the safe box and `dvh` itself collapses to 812, which would leave that
+	   same 62px dead band permanently. `vh` is the one unit that kept reporting the
+	   true screen height in *both* states, so the installed app sizes off vh. Browsers
+	   stay on dvh, where vh is the *large* viewport and would bury the composer behind
+	   Safari's toolbar with no way to scroll to it. data-standalone (set in hooks/browser.ts
+	   from navigator.standalone) covers iOS versions that don't match the media query. */
+	@media (display-mode: standalone) {
+		html,
+		body,
+		#root {
+			height: var(--app-height, 100vh);
+		}
+	}
+	html[data-standalone],
+	html[data-standalone] body,
+	html[data-standalone] #root {
+		height: var(--app-height, 100vh);
+	}
+	/* A `fixed` overlay resolves its height against the layout viewport, which does not
+	   shrink for the software keyboard — so a full-height sheet holding a focused input
+	   draws its own content behind that keyboard. `.app-height` is the app column's own
+	   sizing, above, for a sheet that must stop where the column does. Written out here
+	   rather than added to the selectors above so the desktop branch can win: the
+	   standalone rule is two selectors deep, which a `md:h-auto` utility would lose to. */
+	.app-height {
+		height: var(--app-height, 100dvh);
+	}
+	@media (display-mode: standalone) {
+		.app-height {
+			height: var(--app-height, 100vh);
+		}
+	}
+	html[data-standalone] .app-height {
+		height: var(--app-height, 100vh);
+	}
+	/* md and up the sheet is a centred panel that sizes to its results, not a screen. */
+	@media (width >= 48rem) {
+		.app-height,
+		html[data-standalone] .app-height {
+			height: auto;
+		}
+	}
+	html {
+		/* Two values means system preference. Theme choices narrow this to one. */
+		color-scheme: light dark;
+		/* Paint the app bg on <html> too, so any sub-pixel gap in the safe area
+		   reads as the app color rather than a seam. */
+		background: var(--color-bg);
+	}
+	html[data-theme="light"] {
+		color-scheme: light;
+	}
+	html[data-theme="dark"] {
+		color-scheme: dark;
+	}
+	body {
+		margin: 0;
+		background: var(--color-bg);
+		color: var(--color-text);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+		/* Kill Chrome/Android's horizontal overscroll back-nav; the JS edge-swipe
+		   handler (useEdgeSwipeDrawer) is what suppresses iOS's edge gesture. */
+		overscroll-behavior: none;
+	}
+	button {
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+	}
+	::-webkit-scrollbar {
+		width: 0;
+		height: 0;
+	}
+}
+
+@layer components {
+	.card {
+		@apply flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3.5 text-left transition active:scale-[0.985] active:bg-surface-2;
+	}
+	.pill {
+		@apply rounded-full px-3.5 py-1.5 text-sm font-medium text-muted transition;
+	}
+	.pill-active {
+		@apply bg-surface-2 text-text;
+	}
+	/* Composer control (components/agents/AgentBar.tsx): a tighter pill whose 8px gutter
+	   matches the textarea's own text inset, so every label inside the composer
+	   card starts on the same vertical rule as the prompt. */
+	.ctl {
+		@apply rounded-full px-2 py-1 text-[13px] font-medium text-muted transition;
+	}
+	.ctl-on {
+		@apply bg-surface-2 text-text;
+	}
+	/* Chosen on the phone, not yet pushed into Conductor — it rides along with the
+	   next message. Deliberately the accent, so "staged" can't read as "on". */
+	.ctl-staged {
+		@apply bg-accent-soft text-accent;
+	}
+	.dot {
+		@apply size-2.5 shrink-0 rounded-full bg-faint;
+	}
+	/**
+	 * The ongoing-work indicator (agent or CI): a spinning ring in the dot's own
+	 * colour, standing in for the dot itself. A pulsing halo was too easy to miss
+	 * on a phone — motion around a fixed outline reads at a glance where a fading
+	 * shadow didn't. Wider than the `.dot` it replaces so the arc is legible;
+	 * `--spin-color` is set per instance (defaults to the working amber), and the
+	 * centre stays transparent so callers over a busy backdrop can fill it.
+	 */
+	.dot-spinner {
+		@apply size-3.5 shrink-0 animate-spin rounded-full border-2;
+		--spin-color: var(--color-working);
+		/* Two lit sides, not one: at this size a single bright quadrant is barely
+		   more ink than the dot was, and the dim track is what makes it read as a
+		   ring rather than a stray speck. */
+		border-color: color-mix(in srgb, var(--spin-color) 30%, transparent);
+		border-top-color: var(--spin-color);
+		border-right-color: var(--spin-color);
+	}
+	/* A send failure occupies the ring that was spinning while the relay owned the
+	   prompt. Keeping its footprint still makes the state transition read as one
+	   operation, while the X matches the red Retry / Dismiss bubble in the chat. */
+	.dot-error {
+		@apply flex size-3.5 shrink-0 items-center justify-center rounded-full border-2 border-del text-del;
+	}
+	.dot-idle {
+		background: var(--color-idle);
+	}
+	.dot-done {
+		background: var(--color-done);
+	}
+	/* One dot of the transcript's three-dot "agent is working" bubble; siblings stagger. */
+	.typing-dot {
+		@apply size-1.5 rounded-full bg-muted;
+		animation: typing 1.2s ease-in-out infinite;
+	}
+	.typing-dot:nth-child(2) {
+		animation-delay: 0.15s;
+	}
+	.typing-dot:nth-child(3) {
+		animation-delay: 0.3s;
+	}
+}
+
+/* Chat markdown (rendered by components/transcript/Markdown.tsx). Preflight strips list/heading
+   styles, so everything a transcript needs is restored here, scoped under .md. */
+@layer components {
+	.md > :first-child {
+		margin-top: 0;
+	}
+	.md > :last-child {
+		margin-bottom: 0;
+	}
+	.md p {
+		margin: 0.5em 0;
+	}
+	.md h1,
+	.md h2,
+	.md h3,
+	.md h4,
+	.md h5,
+	.md h6 {
+		margin: 0.9em 0 0.4em;
+		font-weight: 600;
+		line-height: 1.3;
+	}
+	.md h1 {
+		font-size: 1.6em;
+	}
+	.md h2 {
+		font-size: 1.4em;
+	}
+	.md h3 {
+		font-size: 1.2em;
+	}
+	.md h4 {
+		font-size: 1.1em;
+	}
+	.md ul,
+	.md ol {
+		margin: 0.5em 0;
+		padding-left: 1.4em;
+	}
+	.md ul {
+		list-style: disc;
+	}
+	.md ol {
+		list-style: decimal;
+	}
+	.md li {
+		margin: 0.3em 0;
+	}
+	.md li > ul,
+	.md li > ol {
+		margin: 0.2em 0;
+	}
+	.md code {
+		border-radius: 0.3rem;
+		background: color-mix(in srgb, var(--color-surface-2) 80%, transparent);
+		padding: 0.1em 0.35em;
+		font-family: var(--font-mono);
+		font-size: 0.85em;
+	}
+	.md pre {
+		margin: 0.5em 0;
+		overflow-x: auto;
+		border: 1px solid var(--color-border-soft);
+		border-radius: 0.6rem;
+		background: var(--color-bg);
+		padding: 0.6em 0.75em;
+	}
+	.md pre code {
+		background: transparent;
+		padding: 0;
+		font-size: 12px;
+		line-height: 1.5;
+	}
+	.md a {
+		color: var(--color-accent);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+	.md blockquote {
+		margin: 0.5em 0;
+		border-left: 2px solid var(--color-border);
+		padding-left: 0.75em;
+		color: var(--color-muted);
+	}
+	.md hr {
+		margin: 1.25em 0;
+		border: 0;
+		border-top: 1px solid var(--color-border-soft);
+	}
+	.md img {
+		display: block;
+		max-width: 100%;
+		height: auto;
+		margin: 0.5em 0;
+		border-radius: 0.6rem;
+	}
+	.md table {
+		display: block;
+		margin: 0.5em 0;
+		max-width: 100%;
+		overflow-x: auto;
+		border-collapse: collapse;
+		font-size: 0.9em;
+	}
+	.md th,
+	.md td {
+		border: 1px solid var(--color-border);
+		padding: 0.3em 0.6em;
+		text-align: left;
+	}
+	.md th {
+		background: var(--color-surface-2);
+		font-weight: 600;
+	}
+	.md strong {
+		font-weight: 600;
+	}
+	.md input[type="checkbox"] {
+		margin-right: 0.4em;
+	}
+
+	/* Highlight.js token classes (web/src/lib/syntax/highlight.ts), drawn from this app's own
+	   palette rather than from a shipped theme: the same six colours the rest of the
+	   phone uses, so a fenced block, a Bash step and a source preview read alike.
+	   Unscoped on purpose — the class prefix is unique, and the three places that show
+	   code sit in different trees. */
+	.hljs-comment,
+	.hljs-quote {
+		color: var(--color-faint);
+		font-style: italic;
+	}
+	.hljs-keyword,
+	.hljs-literal,
+	.hljs-type,
+	.hljs-built_in,
+	.hljs-selector-tag,
+	.hljs-doctag,
+	.hljs-meta .hljs-keyword {
+		color: var(--color-accent);
+	}
+	.hljs-string,
+	.hljs-regexp,
+	.hljs-char.escape_,
+	.hljs-addition,
+	.hljs-meta .hljs-string {
+		color: var(--color-add);
+	}
+	.hljs-number,
+	.hljs-symbol,
+	.hljs-bullet,
+	.hljs-link,
+	.hljs-meta,
+	.hljs-template-variable {
+		color: var(--color-working);
+	}
+	.hljs-title,
+	.hljs-title.class_,
+	.hljs-title.function_,
+	.hljs-name,
+	.hljs-section,
+	.hljs-selector-id,
+	.hljs-selector-class {
+		color: var(--color-done);
+	}
+	.hljs-attr,
+	.hljs-attribute,
+	.hljs-property,
+	.hljs-variable,
+	.hljs-params,
+	.hljs-subst,
+	.hljs-template-tag {
+		color: var(--color-text);
+	}
+	.hljs-deletion {
+		color: var(--color-del);
+	}
+	.hljs-emphasis {
+		font-style: italic;
+	}
+	.hljs-strong {
+		font-weight: 600;
+	}
+}
+
+@keyframes typing {
+	0%,
+	60%,
+	100% {
+		opacity: 0.35;
+		transform: none;
+	}
+	30% {
+		opacity: 1;
+		transform: translateY(-3px);
+	}
+}
+
+@keyframes fade-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+.fade-in {
+	animation: fade-in 0.18s ease-out;
+}
+/* The entrance is the only motion on most of these; drop the travel and keep the
+   opacity so nothing appears out of nowhere. */
+@media (prefers-reduced-motion: reduce) {
+	.fade-in {
+		animation: none;
+		opacity: 1;
+	}
+	.typing-dot {
+		animation: none;
+		opacity: 0.6;
+	}
+}
+
+/* Safe-area padding for notches / home indicator. */
+.pt-safe {
+	padding-top: max(env(safe-area-inset-top), 0.5rem);
+}
+.pb-safe {
+	padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+}
+/* With the keyboard up (data-keyboard, set by useVisualViewportHeight) the app's
+   bottom edge is the top of the keyboard, not the screen — the home indicator is
+   behind the keyboard, so reserving its inset just floats the composer on a dead
+   band. Drop back to the plain padding. */
+html[data-keyboard] .pb-safe {
+	padding-bottom: 0.5rem;
+}

@@ -1,0 +1,198 @@
+import type { TranscriptEntry } from '../../src/contract/types/parser.ts'
+
+/**
+ * The entries the relay returns for one invented chat that shows every kind of entry:
+ * a prompt, thinking, prose, tool calls with and without a detail, a subagent call and
+ * its nested frames, results as text, a diff, an image, a failure and raw JSON, the two
+ * system notes, and a prompt queued in each of the two ways.
+ *
+ * The relay's parser test produces the same value from the stored rows and compares it
+ * with `fixtures/transcript-entries.json`, which the test beside this file holds equal
+ * to this constant. A change on either side therefore fails on both.
+ */
+export const transcriptEntries: TranscriptEntry[] = [
+	{
+		id: 'msg-01',
+		rowid: 1,
+		role: 'user',
+		text: 'Rename the `slug` helper to `slugify` and make sure the tests still pass.',
+		ts: '2026-09-14T09:30:01.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-03:0',
+		rowid: 3,
+		role: 'thinking',
+		text: 'The helper is probably used in more than one module. Search before editing.',
+		ts: '2026-09-14T09:30:03.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-03:1',
+		rowid: 3,
+		role: 'assistant',
+		text: "I'll find every use of `slug` first.",
+		ts: '2026-09-14T09:30:03.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-03:2',
+		rowid: 3,
+		role: 'tool',
+		text: 'Find uses of slug',
+		tool: 'Bash',
+		detail: 'rg -n "slug\\(" src',
+		toolUseId: 'toolu_search',
+		ts: '2026-09-14T09:30:03.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-04:0',
+		rowid: 4,
+		role: 'tool',
+		text: '',
+		toolUseId: 'toolu_search',
+		output: 'src/text.rs:14:pub fn slug(input: &str) -> String {\nsrc/routes.rs:52:    let id = slug(&title);',
+		ts: '2026-09-14T09:30:04.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-05:0',
+		rowid: 5,
+		role: 'assistant',
+		text: 'Two places. Renaming the definition and the call site.',
+		ts: '2026-09-14T09:30:05.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-05:1',
+		rowid: 5,
+		role: 'tool',
+		text: 'Edit',
+		tool: 'Edit',
+		detail: 'src/text.rs',
+		toolUseId: 'toolu_edit',
+		ts: '2026-09-14T09:30:05.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-06:0',
+		rowid: 6,
+		role: 'tool',
+		text: '',
+		toolUseId: 'toolu_edit',
+		output:
+			'update src/text.rs\n@@ -14,1 +14,1 @@\n-pub fn slug(input: &str) -> String {\n+pub fn slugify(input: &str) -> String {',
+		diff: true,
+		ts: '2026-09-14T09:30:06.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-07:0',
+		rowid: 7,
+		role: 'tool',
+		text: 'Check the docs for slug',
+		tool: 'Agent',
+		detail: 'Look through docs/ for mentions of the slug helper and report them.',
+		toolUseId: 'toolu_agent',
+		subagentLabel: 'Check the docs for slug',
+		ts: '2026-09-14T09:30:07.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-08:0',
+		rowid: 8,
+		role: 'assistant',
+		text: 'Reading the helper guide.',
+		parentToolUseId: 'toolu_agent',
+		ts: '2026-09-14T09:30:08.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-08:1',
+		rowid: 8,
+		role: 'tool',
+		text: 'Read',
+		tool: 'Read',
+		detail: 'docs/helpers.md',
+		toolUseId: 'toolu_read',
+		parentToolUseId: 'toolu_agent',
+		ts: '2026-09-14T09:30:08.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-09:0',
+		rowid: 9,
+		role: 'tool',
+		text: 'File does not exist.',
+		toolUseId: 'toolu_read',
+		parentToolUseId: 'toolu_agent',
+		output: 'File does not exist.',
+		error: true,
+		ts: '2026-09-14T09:30:09.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-10:0',
+		rowid: 10,
+		role: 'tool',
+		text: 'mcp__browser__screenshot',
+		tool: 'mcp__browser__screenshot',
+		toolUseId: 'toolu_shot',
+		ts: '2026-09-14T09:30:10.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-11:0',
+		rowid: 11,
+		role: 'tool',
+		text: '',
+		toolUseId: 'toolu_shot',
+		output: 'Captured the settings page.',
+		images: ['11.0'],
+		ts: '2026-09-14T09:30:11.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-12:0',
+		rowid: 12,
+		role: 'tool',
+		text: '',
+		toolUseId: 'toolu_1',
+		output: '{"matches":3,"ratio":0.5,"kind":"summary"}',
+		ts: '2026-09-14T09:30:12.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-14',
+		rowid: 14,
+		role: 'system',
+		text: 'aborted by user',
+		ts: '2026-09-14T09:30:14.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-15',
+		rowid: 15,
+		role: 'system',
+		text: '{"type":"assistant","message":{"content":[{"type":"text","text":"The rename is',
+		ts: '2026-09-14T09:30:15.000Z',
+		queued: false
+	},
+	{
+		id: 'msg-16',
+		rowid: 16,
+		role: 'user',
+		text: 'Also update the changelog.',
+		ts: '2026-09-14T09:30:16.000Z',
+		queued: true
+	},
+	{
+		id: 'msg-17',
+		rowid: 0,
+		role: 'user',
+		text: 'Then open a pull request.',
+		ts: '2026-09-14T09:31:05.000Z',
+		queued: true
+	}
+]

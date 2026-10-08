@@ -1,0 +1,46 @@
+[package]
+name = "conductor-remote"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "conductor_remote"
+
+[[bin]]
+name = "conductor-remote"
+path = "src/main.rs"
+
+[dependencies]
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"] }
+anyhow = "1.0.104"
+axum = "0.8.9"
+base64 = "0.23.1"
+block2 = "0.6.2"
+clap = { version = "4.6.7", features = ["derive"] }
+flate2 = "1.1.10"
+getrandom = "0.4.3"
+hkdf = "0.12.4"
+mime_guess = "2.0.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication", "libc"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString", "CFArray", "CFDictionary", "CFNumber", "CFBundle"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSString", "NSArray", "NSDictionary", "NSNotification", "NSOperation", "NSRunLoop", "NSObject", "NSEnumerator", "NSURL"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdh", "ecdsa", "std"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+rust-embed = "8.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+sha1 = "0.11.0"
+sha2 = "0.10.9"
+subtle = "2.6.1"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "sync", "signal", "time", "io-util"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+http-body-util = "0.1.5"
+tempfile = "3.27.0"
+tower = { version = "0.5.3", features = ["util"] }
+tokio = { version = "1.53.2", features = ["test-util"] }
