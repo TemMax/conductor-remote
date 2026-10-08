@@ -155,11 +155,13 @@ fn main() -> ExitCode {
                 eprintln!("error: {message}");
                 return ExitCode::FAILURE;
             }
-            let report = tailnet::run(
+            let report = tailnet::run_configured(
                 action,
                 &SystemRunner,
                 find_tailscale(|path| path.exists()).as_deref(),
                 config.port,
+                &config.state_dir,
+                &|name| std::env::var(name).ok(),
             );
             println!("{}", tailnet::render(&report, json));
             if report.error.is_none() {
@@ -294,7 +296,7 @@ fn start(exit_with_parent: bool, parent_pid: Option<u32>) -> ExitCode {
     // without `gh` or `git` simply shows no pull-request state or change statistics.
     let extras = Extras::new(std::sync::Arc::new(SystemCommands), home.clone());
     let preview_roots = PreviewRoots::system(&paths.workspaces_root, &home);
-    // Public exposure is not supported: `EXPOSE` is tailnet or off, and off only skips the mapping.
+    // Public exposure is not supported: EXPOSE controls the Tailscale mapping, never the bind address.
     let expose = ExposeMode::Tailnet;
     // The plan allowances come from the CLIs Conductor bundles, else from the `PATH`; the tool
     // traffic is scanned from the database on request.

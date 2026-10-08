@@ -5,6 +5,8 @@
 
 use std::path::Path;
 
+use crate::state::settings::{self, Expose, Source};
+
 use super::ServeStatus;
 use super::{choose_https_port, dns_name, exec_checked, serve_status, CommandRunner, HttpsPort};
 
@@ -14,12 +16,20 @@ pub enum TailnetAction {
     Status,
     Ensure,
     Off,
+    /// Save EXPOSE=tailnet and set up the mapping.
+    Enable,
+    /// Save EXPOSE=off and remove the mapping.
+    Disable,
 }
 
 /// The relay's place on the tailnet. Serialised in camelCase.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TailnetReport {
+    /// Resolved EXPOSE; null when settings could not be read.
+    pub enabled: Option<bool>,
+    /// "environment", "file" or "default"; never a setting's contents.
+    pub expose_source: Option<String>,
     /// Whether a `tailscale` binary was found.
     pub tailscale: bool,
     /// This Mac's tailnet name, without the trailing dot.
@@ -37,6 +47,8 @@ pub struct TailnetReport {
 impl TailnetReport {
     fn empty() -> Self {
         Self {
+            enabled: None,
+            expose_source: None,
             tailscale: false,
             host: None,
             https_port: None,
@@ -55,6 +67,78 @@ impl TailnetReport {
     }
 }
 
+/// Read EXPOSE for every command. Explicit enable/disable persist the preference before
+/// reconciling the mapping; a failed Tailscale command never discards that preference.
+pub fn run_configured(
+    action: TailnetAction,
+    runner: &dyn CommandRunner,
+    tailscale: Option<&Path>,
+    relay_port: u16,
+    state_dir: &Path,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> TailnetReport {
+    let (mut resolved, mut rows) = match settings::resolve(state_dir, env) {
+        Ok(value) => value,
+        Err(_) => {
+            let mut report = TailnetReport::empty();
+            report.fail("the relay settings could not be read; check EXPOSE and settings.json");
+            return report;
+        }
+    };
+    let source =
+        |rows: &[settings::Row]| rows.iter().find(|row| row.0 == "EXPOSE").map(|row| row.2);
+    let mut preference_error = None;
+    if matches!(action, TailnetAction::Enable | TailnetAction::Disable) {
+        if source(&rows) == Some(Source::Environment) {
+            preference_error =
+                Some("EXPOSE is controlled by the environment; remove that override to change it");
+        } else {
+            let value = if action == TailnetAction::Enable {
+                "tailnet"
+            } else {
+                "off"
+            };
+            if settings::set(state_dir, "EXPOSE", value).is_err() {
+                preference_error = Some("the access preference could not be saved");
+            } else {
+                match settings::resolve(state_dir, env) {
+                    Ok(value) => (resolved, rows) = value,
+                    Err(_) => {
+                        let mut report = TailnetReport::empty();
+                        report.fail("the saved access preference could not be read");
+                        return report;
+                    }
+                }
+            }
+        }
+    }
+    let enabled = resolved.expose == Expose::Tailnet;
+    let effective = if preference_error.is_some() {
+        TailnetAction::Status
+    } else {
+        match action {
+            TailnetAction::Enable => TailnetAction::Ensure,
+            TailnetAction::Disable => TailnetAction::Off,
+            TailnetAction::Ensure if !enabled => TailnetAction::Off,
+            action => action,
+        }
+    };
+    let mut report = run(effective, runner, tailscale, relay_port);
+    report.enabled = Some(enabled);
+    report.expose_source = source(&rows).map(|source| {
+        match source {
+            Source::Environment => "environment",
+            Source::File => "file",
+            Source::Default => "default",
+        }
+        .to_owned()
+    });
+    if let Some(error) = preference_error {
+        report.fail(error);
+    }
+    report
+}
+
 /// Blocking. `tailscale` is the binary, `None` when this Mac has none.
 pub fn run(
     action: TailnetAction,
@@ -63,6 +147,10 @@ pub fn run(
     relay_port: u16,
 ) -> TailnetReport {
     let mut report = TailnetReport::empty();
+    if matches!(action, TailnetAction::Enable | TailnetAction::Disable) {
+        report.fail("enable and disable require the persisted access settings");
+        return report;
+    }
     let Some(tailscale) = tailscale else {
         if action == TailnetAction::Ensure {
             report.fail("tailscale was not found on this Mac");
@@ -89,6 +177,12 @@ pub fn run(
         Err(()) => report.fail("the serve status could not be read"),
     }
     report.mapped = report.https_port.is_some();
+
+    if action == TailnetAction::Off && report.mapped {
+        report.fail("the mapping is still active; access could not be turned off");
+    } else if action == TailnetAction::Ensure && !report.mapped && report.error.is_none() {
+        report.fail("the mapping could not be confirmed");
+    }
 
     match dns_name(runner, tailscale) {
         Ok(name) => report.host = Some(name.strip_suffix('.').unwrap_or(&name).to_owned()),
@@ -123,7 +217,7 @@ fn act(
 ) -> Option<Result<(), &'static str>> {
     let program = tailscale.to_string_lossy();
     match action {
-        TailnetAction::Status => None,
+        TailnetAction::Status | TailnetAction::Enable | TailnetAction::Disable => None,
         TailnetAction::Ensure => {
             let port = match choose_https_port(json, relay_port) {
                 Ok(HttpsPort::Existing(_)) => return None,
@@ -142,7 +236,7 @@ fn act(
             let port = status.mapping_to(relay_port)?;
             let https = format!("--https={port}");
             Some(
-                exec_checked(runner, &program, &["serve", &https, "off"])
+                exec_checked(runner, &program, &["serve", &https, "--set-path=/", "off"])
                     .map(|_| ())
                     .map_err(|_| "the mapping could not be turned off"),
             )
@@ -165,6 +259,16 @@ pub fn render(report: &TailnetReport, json: bool) -> String {
     )];
     if let Some(host) = &report.host {
         lines.push(format!("host: {host}"));
+    }
+    if let Some(enabled) = report.enabled {
+        lines.push(format!(
+            "access: {}",
+            if enabled {
+                "enabled"
+            } else {
+                "off (local only)"
+            }
+        ));
     }
     lines.push(match &report.url {
         Some(url) => format!("tailnet: {url}"),

@@ -3,16 +3,6 @@ import ApplicationServices
 import ConductorRemoteKit
 import Observation
 
-/// How far the phone link is.
-enum PhoneLinkState: Equatable {
-    /// The relay is on the tailnet at this address: the phone link without the token.
-    case ready(address: String)
-    /// A `tailnet` command is running.
-    case checking
-    case tailscaleMissing
-    case notSetUp
-}
-
 /// The app's state, and the kit objects behind it for the app's life.
 @MainActor
 @Observable
@@ -90,11 +80,11 @@ final class AppModel {
     }
 
     var phoneLinkState: PhoneLinkState {
-        if phoneLink != nil, let address = tailnet?.url { return .ready(address: address) }
-        if tailnetBusy { return .checking }
-        if let tailnet, !tailnet.tailscale { return .tailscaleMissing }
-        return .notSetUp
+        PhoneLinkState(report: tailnet, busy: tailnetBusy, hasLink: phoneLink != nil)
     }
+
+    var tailnetEnabled: Bool { tailnet?.enabled == true }
+    var canChangeTailnetAccess: Bool { !tailnetBusy && tailnet?.canChangeAccess == true }
 
     /// The relay's version once it has answered, else the app's.
     var version: String {
@@ -186,9 +176,19 @@ final class AppModel {
         }
     }
 
-    /// "Set up": puts the relay on the tailnet.
+    /// "Set up": retries the current preference, never overrides EXPOSE=off.
     func setUpPhoneLink() {
         Task { await ensureTailnet() }
+    }
+
+    /// Save the choice and reconcile only this relay's Tailscale mapping.
+    func setTailnetAccess(_ enabled: Bool) {
+        Task {
+            guard canChangeTailnetAccess else { return }
+            tailnetBusy = true
+            defer { tailnetBusy = false }
+            apply(await tailnetCommand.run(enabled ? .enable : .disable))
+        }
     }
 
     /// "Refresh" in the phone view.
@@ -303,7 +303,6 @@ final class AppModel {
         }
         // Once per launch, after the first good status.
         if !tailnetChecked {
-            tailnetChecked = true
             Task { await self.ensureTailnet() }
         }
     }
@@ -323,16 +322,13 @@ final class AppModel {
 
     // MARK: - Phone link
 
-    /// `tailnet status`, then `tailnet ensure` when Tailscale is present and the relay is not mapped.
+    /// Respect EXPOSE at launch and remove a stale mapping when access is disabled.
     private func ensureTailnet() async {
         guard !tailnetBusy else { return }
+        tailnetChecked = true
         tailnetBusy = true
         defer { tailnetBusy = false }
-        var report = await tailnetCommand.run(.status)
-        if report.tailscale, !report.mapped {
-            report = await tailnetCommand.run(.ensure)
-        }
-        apply(report)
+        apply(await tailnetCommand.reconcile())
     }
 
     private func apply(_ report: TailnetReport) {

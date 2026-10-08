@@ -28,3 +28,13 @@ import Testing
     let unmappedWithURL = TailnetReport(tailscale: true, mapped: false, url: "https://mac.example.ts.net/")
     #expect(PhoneLink.url(tailnet: unmappedWithURL, token: "made-up-token") == nil)
 }
+
+@Test func phoneLinkIsHiddenWhenAccessIsDisabledOrUnknown() throws {
+    for json in [
+        #"{"tailscale":true,"mapped":true,"url":"https://mac.example.ts.net/","enabled":false}"#,
+        #"{"tailscale":true,"mapped":true,"url":"https://mac.example.ts.net/"}"#,
+    ] {
+        let report = try JSONDecoder().decode(TailnetReport.self, from: Data(json.utf8))
+        #expect(PhoneLink.url(tailnet: report, token: "made-up-token") == nil)
+    }
+}

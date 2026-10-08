@@ -44,7 +44,7 @@ struct ConductorRemoteApp: App {
         .closedAtLaunch()
 
         Window("Settings", id: "settings") {
-            SettingsView(updater: updater, launchAtLogin: launchAtLogin)
+            SettingsView(model: model, updater: updater, launchAtLogin: launchAtLogin)
         }
         .windowResizability(.contentSize)
         .closedAtLaunch()

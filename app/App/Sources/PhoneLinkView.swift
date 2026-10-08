@@ -48,7 +48,7 @@ struct PhoneLinkView: View {
                 .multilineTextAlignment(.center)
         }
         if let action {
-            Button(action.title, action: action.run).disabled(model.checkingPort)
+            Button(action.title, action: action.run).disabled(model.checkingPort || model.tailnetBusy)
         }
     }
 
@@ -69,6 +69,10 @@ struct PhoneLinkView: View {
             return ("The relay is not running.", RowAction("Restart relay") { model.restartRelay() })
         }
         switch model.phoneLinkState {
+        case .disabled:
+            return ("Remote access is off. You can still use Remote on this Mac. Enable Access over Tailscale in Settings to connect from other devices.", nil)
+        case .failed:
+            return ("Remote access could not be confirmed.", RowAction("Retry") { model.setUpPhoneLink() })
         case .checking:
             return ("Looking for the relay on your tailnet…", nil)
         case .tailscaleMissing:

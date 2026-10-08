@@ -48,7 +48,7 @@ import Testing
 
 @Test func tailnetReportDecodesAMapping() throws {
     let json = """
-    {"tailscale":true,"host":"mac.example.ts.net","httpsPort":8443,"mapped":true,"url":"https://mac.example.ts.net:8443/","error":null}
+    {"tailscale":true,"host":"mac.example.ts.net","httpsPort":8443,"mapped":true,"url":"https://mac.example.ts.net:8443/","error":null,"enabled":true}
     """
     let report = try JSONDecoder().decode(TailnetReport.self, from: Data(json.utf8))
     #expect(report == TailnetReport(
@@ -59,7 +59,7 @@ import Testing
 
 @Test func tailnetReportDecodesNulls() throws {
     let json = """
-    {"tailscale":false,"host":null,"httpsPort":null,"mapped":false,"url":null,"error":"tailscale is not installed"}
+    {"tailscale":false,"host":null,"httpsPort":null,"mapped":false,"url":null,"error":"tailscale is not installed","enabled":true}
     """
     let report = try JSONDecoder().decode(TailnetReport.self, from: Data(json.utf8))
     #expect(report == TailnetReport(tailscale: false, mapped: false, error: "tailscale is not installed"))

@@ -76,6 +76,11 @@ struct OnboardingView: View {
 
     private var tailscaleStep: ChecklistStep {
         switch model.phoneLinkState {
+        case .disabled:
+            ChecklistStep(mark: .done, title: "Remote access", detail: "Off. Remote is available only on this Mac. You can enable Tailscale access in Settings.")
+        case .failed:
+            ChecklistStep(mark: .attention, title: "Remote access", detail: "Access could not be confirmed.",
+                          action: RowAction("Retry") { model.setUpPhoneLink() })
         case .ready(let address):
             ChecklistStep(mark: .done, title: "Tailscale", detail: address)
         case .checking:
@@ -91,12 +96,14 @@ struct OnboardingView: View {
     }
 
     @ViewBuilder private var phoneStep: some View {
-        if let link = model.phoneLink {
+        if let link = model.phoneLink, case .ready = model.phoneLinkState {
             ChecklistStep(mark: .waiting, title: "Phone",
                           detail: "Scan the code with your phone, open the link and add it to the Home Screen.")
             QRCodeView(text: link.absoluteString)
                 .frame(width: 180, height: 180)
                 .frame(maxWidth: .infinity)
+        } else if model.phoneLinkState == .disabled {
+            ChecklistStep(mark: .done, title: "Phone", detail: "Remote access is off; no phone link is shared.")
         } else {
             ChecklistStep(mark: .waiting, title: "Phone", detail: "The code to scan appears here after the steps above.")
         }
