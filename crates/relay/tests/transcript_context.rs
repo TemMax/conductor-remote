@@ -907,6 +907,7 @@ fn entry(role: TranscriptRole, text: &str) -> TranscriptEntry {
         role,
         text: text.to_owned(),
         tool: None,
+        question: None,
         detail: None,
         tool_use_id: None,
         parent_tool_use_id: None,
@@ -1130,6 +1131,7 @@ fn render_lines_headings_and_joining() {
         entry(TranscriptRole::System, "  aborted by user"),
         TranscriptEntry {
             tool: None,
+            question: None,
             ..entry(TranscriptRole::Tool, "unnamed")
         },
         entry(TranscriptRole::User, "- a user list item"),

@@ -25,6 +25,11 @@ const TOKEN: &str = "secret-token";
 #[derive(Clone, Debug, PartialEq)]
 enum Call {
     Send(SendRequest),
+    Questions(
+        String,
+        conductor_remote::delivery::questions::AnswerQuestionsRequest,
+        Priority,
+    ),
     Stop {
         session_id: String,
         workspace_id: Option<String>,
@@ -141,6 +146,15 @@ impl FakeWrites {
 }
 
 impl WriteService for FakeWrites {
+    fn answer_questions(
+        &self,
+        id: String,
+        request: conductor_remote::delivery::questions::AnswerQuestionsRequest,
+        priority: Priority,
+    ) -> BoxFuture<WriteAnswer> {
+        self.record(Call::Questions(id, request, priority))
+    }
+
     fn available(&self) -> bool {
         true
     }
@@ -433,6 +447,7 @@ async fn assert_prompt_refused(body: &str, message: &str) {
 async fn every_write_route_needs_the_token() {
     for uri in [
         "/api/sessions/s1/prompt",
+        "/api/sessions/s1/questions/answer",
         "/api/sessions/s1/stop",
         "/api/workspaces/w1/sessions",
     ] {
@@ -852,6 +867,10 @@ async fn the_service_status_body_and_retry_after_pass_through() {
     });
     for (uri, body) in [
         ("/api/sessions/s1/prompt", r#"{"text":"hi"}"#),
+        (
+            "/api/sessions/s1/questions/answer",
+            r#"{"workspaceId":"sample-ws","requestId":"sample-call","answers":[{"selected":[0]}]}"#,
+        ),
         ("/api/sessions/s1/stop", ""),
         ("/api/workspaces/w1/sessions", ""),
     ] {
@@ -882,6 +901,10 @@ async fn without_a_service_every_write_route_is_unavailable() {
     let app = app_with(None, ConductorStatus::Running);
     for (uri, body) in [
         ("/api/sessions/s1/prompt", r#"{"text":"hi"}"#),
+        (
+            "/api/sessions/s1/questions/answer",
+            r#"{"workspaceId":"sample-ws","requestId":"sample-call","answers":[{"selected":[0]}]}"#,
+        ),
         ("/api/sessions/s1/stop", ""),
         ("/api/workspaces/w1/sessions", ""),
     ] {
@@ -955,7 +978,11 @@ async fn listing_sessions_still_reaches_the_reads_route() {
 #[tokio::test]
 async fn other_methods_on_the_write_paths_are_not_found() {
     for method in [Method::GET, Method::PUT, Method::DELETE, Method::PATCH] {
-        for uri in ["/api/sessions/s1/prompt", "/api/sessions/s1/stop"] {
+        for uri in [
+            "/api/sessions/s1/prompt",
+            "/api/sessions/s1/stop",
+            "/api/sessions/s1/questions/answer",
+        ] {
             if method == Method::DELETE && uri == "/api/sessions/s1/prompt" {
                 // Reaches `dismiss_parked` now; the dismiss tests below cover it.
                 continue;
@@ -1670,5 +1697,49 @@ async fn the_workspace_action_posts_need_the_token_and_the_service() {
             text(response).await,
             r#"{"error":"writes are unavailable"}"#
         );
+    }
+}
+
+#[tokio::test]
+async fn question_answer_route_passes_identity_and_batch_to_service() {
+    let (app, writes) = app();
+    let body = json!({"workspaceId":"sample-ws","requestId":"sample-call","answers":[{"selected":[0]},{"selected":[],"other":"Sample text"}]});
+    let response = app
+        .oneshot(post(
+            "/api/sessions/sample-chat/questions/answer",
+            &[],
+            &body.to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        writes.calls(),
+        vec![Call::Questions(
+            "sample-chat".into(),
+            serde_json::from_value(body).unwrap(),
+            Priority::Interactive
+        )]
+    );
+}
+
+#[tokio::test]
+async fn question_answers_reject_malformed_payloads_before_service() {
+    for body in [
+        "{}",
+        r#"{"workspaceId":"sample-ws","requestId":"sample-call","answers":[{"selected":[-1]}]}"#,
+        r#"{"workspaceId":"sample-ws","requestId":"sample-call","answers":[{"selected":[0],"unexpected":true}]}"#,
+    ] {
+        let (app, writes) = app();
+        let response = app
+            .oneshot(post(
+                "/api/sessions/sample-chat/questions/answer",
+                &[],
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(writes.calls().is_empty());
     }
 }

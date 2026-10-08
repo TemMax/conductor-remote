@@ -83,6 +83,7 @@ pub fn parse_message(row: &StoredMessage, worktree: Option<&str>) -> Vec<Transcr
         role: TranscriptRole::System,
         text: String::new(),
         tool: None,
+        question: None,
         detail: None,
         tool_use_id: None,
         parent_tool_use_id: None,
@@ -122,6 +123,23 @@ pub fn parse_message(row: &StoredMessage, worktree: Option<&str>) -> Vec<Transcr
             .map(str::to_owned),
         ..base
     };
+
+    if frame_type == Some("assistant") {
+        if let Some(question) = super::questions::codex_request(&frame) {
+            return vec![TranscriptEntry {
+                id: format!("question:codex:{}", question.id),
+                role: TranscriptRole::Assistant,
+                text: question
+                    .questions
+                    .iter()
+                    .map(|q| q.question.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                question: Some(question),
+                ..base
+            }];
+        }
+    }
 
     // Bookkeeping frames: hooks, init, token accounting, the end of a turn.
     if matches!(frame_type, Some("system" | "result")) {
@@ -197,6 +215,7 @@ pub fn parse_message(row: &StoredMessage, worktree: Option<&str>) -> Vec<Transcr
                     entry.subagent_label = subagent_label(name, input);
                     entry.text = text;
                     entry.detail = detail;
+                    entry.question = super::questions::claude_request(block);
                 });
             }
             Some("tool_result") => {
@@ -256,6 +275,7 @@ pub fn parse_outbox_message(row: &StoredOutboxMessage) -> Option<TranscriptEntry
         role: TranscriptRole::User,
         text: text.to_owned(),
         tool: None,
+        question: None,
         detail: None,
         tool_use_id: None,
         parent_tool_use_id: None,

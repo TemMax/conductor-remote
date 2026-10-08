@@ -6,6 +6,7 @@ pub mod extras;
 pub mod images;
 pub mod messages;
 pub mod models;
+pub mod questions;
 pub mod receipts;
 pub mod review;
 pub mod sessions;

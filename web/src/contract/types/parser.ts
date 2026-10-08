@@ -1,4 +1,21 @@
+export interface QuestionRequest {
+	id: string
+	provider: 'claude' | 'codex'
+	questions: {
+		header: string | null
+		question: string
+		options: { label: string; description: string }[]
+		multiSelect: boolean
+	}[]
+}
+
+export interface QuestionAnswer {
+	selected: number[]
+	other?: string | null
+}
+
 export interface TranscriptEntry {
+	question?: QuestionRequest
 	id: string
 	rowid: number
 	/** Display role: user | assistant | tool | thinking | system */

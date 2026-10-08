@@ -106,6 +106,7 @@ pub(crate) struct Inner {
     pub(crate) trusted: Arc<dyn Fn() -> bool + Send + Sync>,
     pub(crate) timings: WriteTimings,
     pub(crate) sendonce: SendOnce<WriteAnswer>,
+    pub(crate) question_once: SendOnce<WriteAnswer>,
     pub(crate) parked: Arc<ParkedQueue>,
     /// Set by [`Writes::configure`]; `None` until then.
     pub(crate) deps: Option<WriteDeps>,
@@ -136,6 +137,7 @@ impl Writes {
                 trusted,
                 timings,
                 sendonce: SendOnce::new(SENDONCE_TTL),
+                question_once: SendOnce::new(SENDONCE_TTL),
                 parked,
                 deps: None,
                 firstprompt: OnceLock::new(),
@@ -173,6 +175,20 @@ impl Writes {
 }
 
 impl WriteService for Writes {
+    fn answer_questions(
+        &self,
+        session_id: String,
+        request: super::questions::AnswerQuestionsRequest,
+        priority: Priority,
+    ) -> BoxFuture<WriteAnswer> {
+        spawned(super::questions::answer(
+            Arc::clone(&self.inner),
+            session_id,
+            request,
+            priority,
+        ))
+    }
+
     fn available(&self) -> bool {
         (self.inner.trusted)()
     }

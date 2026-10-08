@@ -34,6 +34,7 @@ import type {
 	PushConfig,
 	PushSubscribeResult,
 	PushTestResult,
+	QuestionAnswer,
 	ReposResponse,
 	RestartConductorResult,
 	RestoreChatResult,
@@ -59,7 +60,8 @@ import type {
 export class ApiError extends Error {
 	constructor(
 		message: string,
-		readonly status: number
+		readonly status: number,
+		readonly submitted = false
 	) {
 		super(message)
 	}
@@ -134,8 +136,8 @@ async function api<T>(path: string, opts: RequestInit = {}, timeoutMs = POLL_TIM
 		throw err
 	}
 	if (!res.ok) {
-		const body = (await res.json().catch(() => ({}))) as { error?: unknown }
-		throw new ApiError(responseErrorMessage(body.error, `HTTP ${res.status}`), res.status)
+		const body = (await res.json().catch(() => ({}))) as { error?: unknown; submitted?: boolean }
+		throw new ApiError(responseErrorMessage(body.error, `HTTP ${res.status}`), res.status, body.submitted === true)
 	}
 	return res.json() as Promise<T>
 }
@@ -259,6 +261,12 @@ export const client = {
 	 * instead of typing again (src/delivery/sendonce.ts). Retry reuses the bubble's id, a fresh
 	 * send makes a fresh one, so saying the same thing twice on purpose still does.
 	 */
+	answerQuestions: (sessionId: string, workspaceId: string, requestId: string, answers: QuestionAnswer[]) =>
+		api<{ ok: boolean; submitted: boolean; answers?: QuestionAnswer[] }>(
+			routes.answerQuestions.path(sessionId),
+			{ method: 'POST', body: JSON.stringify({ workspaceId, requestId, answers }) },
+			SEND_TIMEOUT_MS
+		),
 	sendPrompt: (
 		sessionId: string,
 		text: string,

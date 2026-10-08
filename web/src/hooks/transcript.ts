@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { client } from '../lib/api.ts'
 import { mergeEntries, withQueuedEntries } from '../lib/transcript/merge.ts'
-import type { TranscriptEntry } from '../lib/types.ts'
+import type { QuestionRequest, TranscriptEntry } from '../lib/types.ts'
 import { useApp } from '../store.ts'
 import { useOnline } from './browser.ts'
 
 export interface TranscriptState {
+	pendingQuestion: QuestionRequest | null
 	entries: TranscriptEntry[]
 	loading: boolean
 	error: string | null
@@ -42,7 +43,13 @@ const sameQueuedEntries = (a: readonly TranscriptEntry[], b: readonly Transcript
  */
 export function useTranscript(sessionId: string | null, poll = true): TranscriptState {
 	const report = useOnline()
-	const [state, setState] = useState<TranscriptPollState>({ entries: [], queued: [], loading: true, error: null })
+	const [state, setState] = useState<TranscriptPollState>({
+		entries: [],
+		queued: [],
+		pendingQuestion: null,
+		loading: true,
+		error: null
+	})
 	const cursor = useRef(0)
 	// This poll is also the "I am reading this chat" heartbeat the relay uses to keep a
 	// turn ending on screen off the lock screen. Held in a ref rather than in the effect's
@@ -54,11 +61,11 @@ export function useTranscript(sessionId: string | null, poll = true): Transcript
 
 	useEffect(() => {
 		if (!sessionId) {
-			setState({ entries: [], queued: [], loading: false, error: null })
+			setState({ entries: [], queued: [], pendingQuestion: null, loading: false, error: null })
 			return
 		}
 		cursor.current = 0
-		setState({ entries: [], queued: [], loading: true, error: null })
+		setState({ entries: [], queued: [], pendingQuestion: null, loading: true, error: null })
 		let alive = true
 		let inFlight = false
 
@@ -70,7 +77,12 @@ export function useTranscript(sessionId: string | null, poll = true): Transcript
 				// (SessionView). A chat left on screen behind a locked phone is one you walked away
 				// from, and its notification is the point.
 				const reading = document.visibilityState === 'visible' ? readingRef.current : null
-				const { entries, queued = [], cursor: next } = await client.messages(sessionId, cursor.current, reading)
+				const {
+					entries,
+					pendingQuestion = null,
+					queued = [],
+					cursor: next
+				} = await client.messages(sessionId, cursor.current, reading)
 				if (!alive) return
 				report(true)
 				cursor.current = next
@@ -79,9 +91,11 @@ export function useTranscript(sessionId: string | null, poll = true): Transcript
 					// value so a dispatched or cancelled prompt disappears on the next tick.
 					const nextEntries = entries.length ? mergeEntries(prev.entries, entries) : prev.entries
 					const sameQueued = sameQueuedEntries(prev.queued, queued)
-					if (nextEntries === prev.entries && sameQueued && !prev.loading && !prev.error) return prev
+					const sameQuestion = JSON.stringify(prev.pendingQuestion) === JSON.stringify(pendingQuestion)
+					if (nextEntries === prev.entries && sameQueued && sameQuestion && !prev.loading && !prev.error) return prev
 					return {
 						entries: nextEntries,
+						pendingQuestion: sameQuestion ? prev.pendingQuestion : pendingQuestion,
 						queued: sameQueued ? prev.queued : queued,
 						loading: false,
 						error: null
@@ -108,5 +122,5 @@ export function useTranscript(sessionId: string | null, poll = true): Transcript
 	}, [sessionId, poll, report])
 
 	const visibleEntries = useMemo(() => withQueuedEntries(state.entries, state.queued), [state.entries, state.queued])
-	return { entries: visibleEntries, loading: state.loading, error: state.error }
+	return { pendingQuestion: state.pendingQuestion, entries: visibleEntries, loading: state.loading, error: state.error }
 }

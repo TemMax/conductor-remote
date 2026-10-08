@@ -20,6 +20,8 @@ pub struct MessagesResponse {
     pub cursor: i64,
     /// The whole queue-mode outbox of the chat, whatever the cursor.
     pub queued: Vec<TranscriptEntry>,
+    #[serde(rename = "pendingQuestion", skip_serializing_if = "Option::is_none")]
+    pub pending_question: Option<crate::transcript::questions::QuestionRequest>,
 }
 
 /// How many rows of a chat one `read` fetches. A chat of tens of thousands of rows is read in
@@ -102,6 +104,7 @@ impl Reads {
             entries,
             cursor,
             queued,
+            pending_question: self.pending_question(session_id)?,
         })
     }
 

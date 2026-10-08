@@ -125,6 +125,12 @@ pub enum UiError {
     TabNotSelected,
     #[error("couldn't find the composer")]
     NoComposer,
+    #[error("This question is no longer active in the target chat. Refresh and check Conductor.")]
+    QuestionStale,
+    #[error("Conductor did not accept these question answers. Check the choices and try again.")]
+    QuestionInvalid,
+    #[error("The answer was submitted, but confirmation is unavailable. Check Conductor before trying again.")]
+    QuestionSubmissionUnknown,
     #[error("Conductor did not accept the prompt in its composer")]
     ComposerRejected,
     #[error("Conductor ignored Enter - the prompt is still sitting in its composer")]
@@ -267,6 +273,15 @@ pub struct RunOutcome {
 /// `Desktop`. Not `Send`: it is made on the UI thread and stays there.
 pub trait UiDriver {
     fn trusted(&self) -> bool;
+    fn answer_questions(
+        &mut self,
+        _target: &Target,
+        _request: &crate::transcript::questions::QuestionRequest,
+        _answers: &[crate::transcript::questions::QuestionAnswer],
+        _guard: &dyn Fn() -> bool,
+    ) -> Result<(), UiError> {
+        Err(UiError::QuestionStale)
+    }
     /// Types `text` into the target chat's composer and submits it (Cmd+Return when `queue`).
     /// Returns which press emptied the composer (1 or 2).
     fn send_prompt(&mut self, target: &Target, text: &str, queue: bool) -> Result<u32, UiError>;

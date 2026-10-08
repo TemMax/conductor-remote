@@ -9,6 +9,7 @@ pub mod deliver;
 pub mod firstprompt;
 pub mod merge;
 pub mod parked;
+pub mod questions;
 pub mod sendonce;
 pub mod service;
 pub mod split_workspace;
@@ -109,6 +110,14 @@ impl WriteAnswer {
 pub trait WriteService: Send + Sync + 'static {
     /// Whether this process holds the Accessibility grant.
     fn available(&self) -> bool;
+    fn answer_questions(
+        &self,
+        _session_id: String,
+        _request: questions::AnswerQuestionsRequest,
+        _priority: Priority,
+    ) -> BoxFuture<WriteAnswer> {
+        Box::pin(async { WriteAnswer::error(503, "Question answers are unavailable") })
+    }
     fn send_prompt(&self, request: SendRequest) -> BoxFuture<WriteAnswer>;
     fn stop_turn(
         &self,
