@@ -43,6 +43,7 @@ pub enum FakeEvent {
 type Log = Rc<RefCell<Vec<FakeEvent>>>;
 
 type PressReaction = Rc<dyn Fn(&FakeNode)>;
+type ValueReaction = Rc<dyn Fn(&FakeNode, &str)>;
 type UrlReaction = Box<dyn FnMut(&str)>;
 type KeyReaction = Box<dyn FnMut(Key, Modifiers)>;
 
@@ -62,6 +63,7 @@ struct NodeState {
     log: Log,
     on_press: Vec<PressReaction>,
     on_show_menu: Vec<PressReaction>,
+    on_set_value: Vec<ValueReaction>,
     ignore_value_writes: bool,
     fail_children: Option<AxError>,
     fail_value: Option<AxError>,
@@ -90,6 +92,7 @@ impl FakeNode {
                 log: Log::default(),
                 on_press: Vec::new(),
                 on_show_menu: Vec::new(),
+                on_set_value: Vec::new(),
                 ignore_value_writes: false,
                 fail_children: None,
                 fail_value: None,
@@ -149,6 +152,11 @@ impl FakeNode {
     /// Changes the value without an event.
     pub fn set_value_text(&self, value: Option<&str>) {
         self.state.borrow_mut().value = value.map(str::to_owned);
+    }
+
+    /// Runs after a value write, allowing tests to model the app's AX representation.
+    pub fn on_set_value(&self, reaction: impl Fn(&FakeNode, &str) + 'static) {
+        self.state.borrow_mut().on_set_value.push(Rc::new(reaction));
     }
 
     pub fn set_selected(&self, selected: bool) {
@@ -344,6 +352,11 @@ impl UiNode for FakeNode {
         let mut state = self.state.borrow_mut();
         if !state.ignore_value_writes {
             state.value = Some(text.to_owned());
+        }
+        let reactions = state.on_set_value.clone();
+        drop(state);
+        for reaction in reactions {
+            reaction(self, text);
         }
         Ok(())
     }
