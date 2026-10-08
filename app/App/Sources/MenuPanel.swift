@@ -108,6 +108,11 @@ struct MenuPanel: View {
             StatusRow(color: .green, title: "Phone link", detail: address)
         case .checking:
             StatusRow(color: .yellow, title: "Phone link", detail: "Checking…")
+        case .disabled:
+            StatusRow(color: .gray, title: "Phone link", detail: "Off · local only")
+        case .failed:
+            StatusRow(color: .red, title: "Phone link", detail: "Access setup failed",
+                      action: RowAction("Retry") { model.setUpPhoneLink() })
         case .tailscaleMissing:
             StatusRow(color: .red, title: "Phone link", detail: "Tailscale missing",
                       action: RowAction("Get Tailscale") { model.getTailscale() })

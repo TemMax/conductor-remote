@@ -96,7 +96,7 @@ Every setting has one name, used both as the environment variable and as the key
 | Name | Rule | Default |
 | --- | --- | --- |
 | `RELAY_PORT` | A whole number from 1 to 65535. The service takes its port from its plist, so run `service install` after changing it. | `8790` |
-| `EXPOSE` | `tailnet` or `off`. `off` makes `service install` skip the `tailscale serve` mapping; `public` and `funnel` are refused. | `tailnet` |
+| `EXPOSE` | `tailnet` or `off`. `off` disables automatic Tailscale setup; `tailnet ensure` removes any stale mapping to the relay. `public` and `funnel` are refused. | `tailnet` |
 | `PREVENT_SCREEN_LOCK` | `on` or `off`: whether keep-awake also keeps the display (and so the screen lock) from starting. | `off` |
 | `PUSH_NOTIFY` | `on`, `off`, `true`, `false`, `1` or `0` (stored as `on` or `off`): whether the phone is notified. | `on` |
 | `PUSH_SUBJECT` | Any text: the contact sent to the push services. | the project's URL |
@@ -118,7 +118,11 @@ conductor-remote tailnet ensure --json
 
 `start --exit-with-parent` runs the relay as `start` does and also stops it when the process that started it is gone. The relay notes its parent's process id at start and looks at it every second; once the id is another one (the system gave the relay a new parent), it logs `the process that started the relay is gone; stopping` and shuts down as it does on SIGTERM. It sends no signal to anything. Without the flag nothing watches the parent. `--parent-pid` (it needs `--exit-with-parent`) gives the app's own process id, which the relay compares against from the first look instead of the id it reads at start, so an app that died between starting the relay and that reading is noticed at once and not mistaken for the system's adopter.
 
-`tailnet <status|ensure|off> [--json]` shows, makes or removes the `tailscale serve` mapping to the relay's port, the same mapping `service install` makes and `service uninstall` removes, without the LaunchAgent. It prints a few lines for a person, or with `--json` one line: `{"tailscale":bool,"host":string|null,"httpsPort":number|null,"mapped":bool,"url":string|null,"error":string|null}`. The exit status is 0 when `error` is `null` and 1 otherwise; the token is never printed.
+`tailnet <status|ensure|off|enable|disable> [--json]` manages the `tailscale serve` mapping to the relay's port without the LaunchAgent. `status` is read-only. `ensure` respects the resolved `EXPOSE`: it sets up access when enabled and removes the relay's mapping when disabled. `off` removes the current mapping without changing the preference. `enable` and `disable` save `EXPOSE=tailnet` and `EXPOSE=off`, respectively, then apply the choice. They refuse to change a preference controlled by an environment override. Removal is scoped to the relay's root handler; other ports and other paths on the same port are preserved.
+
+The command prints a few lines for a person, or with `--json` one line: `{"enabled":bool|null,"exposeSource":"environment"|"file"|"default"|null,"tailscale":bool,"host":string|null,"httpsPort":number|null,"mapped":bool,"url":string|null,"error":string|null}`. `enabled` is the resolved preference; `mapped` is the observed network state. Unknown settings or a failed mapping change produce an error, rather than confirming that access changed. The exit status is 0 when `error` is `null` and 1 otherwise; the token is never printed.
+
+In the app, **Settings → Remote access → Access over Tailscale** saves the same preference and applies it immediately, without restarting the relay. Switching it off leaves the local interface running. The menu and phone-link window show **Off · local only**, with no QR code or setup button. On launch the app respects the saved choice. Failed changes remain visible with a retry action; an `EXPOSE` environment override makes the switch read-only.
 
 `GET /api/host/status` (with the token) is what a local supervisor such as the app reads about the relay. It returns:
 

@@ -3,7 +3,7 @@ import Foundation
 /// Runs `relay tailnet <action> --json` and reads the report it prints.
 public struct TailnetCommand: Sendable {
     public enum Action: String, Sendable {
-        case status, ensure, off
+        case status, ensure, off, enable, disable
     }
 
     static let timeout: Duration = .seconds(20)
@@ -16,6 +16,15 @@ public struct TailnetCommand: Sendable {
         self.relay = relay
         self.paths = paths
         self.launcher = launcher
+    }
+
+    public func reconcile() async -> TailnetReport {
+        let report = await run(.status)
+        guard report.error == nil, let enabled = report.enabled else { return report }
+        if report.tailscale, enabled ? !report.mapped : report.mapped {
+            return await run(.ensure)
+        }
+        return report
     }
 
     /// The report on the last non-empty output line, whatever the exit status; a run that fails
@@ -44,6 +53,7 @@ public struct TailnetCommand: Sendable {
     }
 
     private static func failure(_ message: String) -> TailnetReport {
-        TailnetReport(tailscale: false, host: nil, httpsPort: nil, mapped: false, url: nil, error: message)
+        TailnetReport(tailscale: false, host: nil, httpsPort: nil, mapped: false, url: nil,
+                      error: message, enabled: nil)
     }
 }

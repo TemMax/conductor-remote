@@ -2,8 +2,9 @@ import AppKit
 import ConductorRemoteKit
 import SwiftUI
 
-/// The settings window: launch at login, updates, and what the app is.
+/// Launch at login, remote access, updates, and what the app is.
 struct SettingsView: View {
+    let model: AppModel
     @ObservedObject var updater: UpdateController
     let launchAtLogin: LaunchAtLogin
     @Environment(\.openWindow) private var openWindow
@@ -14,6 +15,8 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             general
             Divider()
+            access
+            Divider()
             updates
             Divider()
             about
@@ -21,7 +24,10 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 420)
         .appWindow()
-        .task { credits = Self.readCredits() }
+        .task {
+            credits = Self.readCredits()
+            model.refreshPhoneLink()
+        }
     }
 
     @ViewBuilder private var general: some View {
@@ -31,6 +37,25 @@ struct SettingsView: View {
             set: { launchAtLogin.setEnabled($0) }))
         if let error = launchAtLogin.lastError {
             caption(error)
+        }
+    }
+
+    @ViewBuilder private var access: some View {
+        Text("Remote access").font(.headline)
+        Toggle("Access over Tailscale", isOn: Binding(
+            get: { model.tailnetEnabled },
+            set: { model.setTailnetAccess($0) }))
+            .disabled(!model.canChangeTailnetAccess)
+        caption("Connect from your phone or other devices on your Tailscale network. When off, Remote is available only on this Mac.")
+        if model.tailnetBusy {
+            caption("Checking access…")
+        } else if model.tailnet?.exposeSource == "environment" {
+            caption("Controlled by the EXPOSE environment variable.")
+        }
+        if let error = model.tailnet?.error {
+            caption(error)
+            Button("Retry") { model.setUpPhoneLink() }
+                .disabled(model.tailnetBusy)
         }
     }
 

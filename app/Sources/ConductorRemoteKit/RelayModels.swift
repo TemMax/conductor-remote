@@ -53,6 +53,8 @@ public struct HostStatus: Codable, Sendable, Equatable {
 
 /// `conductor-remote tailnet … --json`.
 public struct TailnetReport: Codable, Sendable, Equatable {
+    public var enabled: Bool?
+    public var exposeSource: String?
     public var tailscale: Bool
     public var host: String?
     public var httpsPort: UInt16?
@@ -60,8 +62,14 @@ public struct TailnetReport: Codable, Sendable, Equatable {
     public var url: String?
     public var error: String?
 
+    /// Unknown settings and an environment override cannot be edited through the app.
+    public var canChangeAccess: Bool { enabled != nil && exposeSource != "environment" }
+
     public init(tailscale: Bool, host: String? = nil, httpsPort: UInt16? = nil, mapped: Bool,
-                url: String? = nil, error: String? = nil) {
+                url: String? = nil, error: String? = nil,
+                enabled: Bool? = true, exposeSource: String? = nil) {
+        self.enabled = enabled
+        self.exposeSource = exposeSource
         self.tailscale = tailscale
         self.host = host
         self.httpsPort = httpsPort
