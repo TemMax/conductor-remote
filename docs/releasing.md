@@ -82,6 +82,61 @@ To check signing and notarization first, start the workflow by hand (Actions ▸
 
 The build number must be above the latest release's. Re-running a tag that was already released, or a manual check run after a release without a bump, stops at the version check.
 
+## Announcing a release on Telegram
+
+The **Announce release** workflow is manual and runs only on `main` in this
+repository. It accepts only the latest published stable `vX.Y.Z` release with
+release notes and its DMG attached. Publishing a GitHub release does not send
+a Telegram message automatically.
+
+Add two repository Actions secrets:
+
+| Secret | Holds |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | The token of the bot that posts announcements. |
+| `TELEGRAM_CHAT_ID` | The target channel's `@username` or numeric `-100…` ID. |
+
+Make the bot a channel administrator with permission to post messages. On macOS,
+save these two values using the same clipboard prompts as the signing secrets:
+
+```sh
+zsh -f scripts/setup-release-secrets.zsh --telegram --clipboard TemMax/conductor-remote
+```
+
+This mode asks only for the two Telegram values. Copy each value from your secret
+store and press Enter without pasting. Keep the token and channel ID out of
+source files, command arguments and public logs.
+
+After checking the published release and the live app update, run **Actions →
+Announce release → Run workflow**, select `main` and enter the published tag.
+The equivalent CLI command posts to the configured channel:
+
+```sh
+gh workflow run announce.yml --repo TemMax/conductor-remote --ref main -f tag=vX.Y.Z
+```
+
+The announcement contains the release notes and **Download** / **Release notes**
+buttons. If Telegram explicitly rejects the rich message, the script sends an
+HTML version with links, shortening long notes at a line boundary. Raw API
+responses and secret-bearing URLs are never logged. If delivery is uncertain
+(for example, a timeout), the workflow fails without retrying: check the channel
+before rerunning. A successful rerun sends another announcement.
+
+To preview either format locally without posting or providing Telegram secrets:
+
+```sh
+python3 scripts/telegram-announce.py --dry-run vX.Y.Z
+python3 scripts/telegram-announce.py --dry-run-fallback vX.Y.Z
+```
+
+Both previews read the published GitHub release and enforce the same release
+checks. Tests use synthetic secrets and a fake transport:
+
+```sh
+python3 scripts/test-telegram-announce.py
+python3 scripts/test-setup-release-secrets.py
+```
+
 ## Updating GitHub Actions
 
 Keep every `uses:` pinned to a full commit SHA, with the corresponding release

@@ -41,12 +41,14 @@ if args[2] == os.environ.get("FAKE_SET_FAIL"):
 
 
 class PromptProcess:
-    def __init__(self, env, repo=None, traced=False, clipboard=False):
+    def __init__(self, env, repo=None, traced=False, clipboard=False, telegram=False):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             args = ["zsh", "-f"] + (["-x"] if traced else []) + [str(SCRIPT)]
             if clipboard:
                 args.append("--clipboard")
+            if telegram:
+                args.append("--telegram")
             if repo:
                 args.append(repo)
             os.execve("/bin/zsh", args, env)
@@ -240,6 +242,23 @@ sys.stdout.buffer.write(pathlib.Path(os.environ["FAKE_CLIPBOARD"]).read_bytes())
         self.assertIn(b"GitHub authentication failed", process.output)
         self.assertNotIn(b"Value (hidden):", process.output)
         self.assertEqual(self.records(), [])
+
+    def test_telegram_mode_only_uploads_two_secrets_from_clipboard(self):
+        self.clipboard_backend()
+        values = ["synthetic-bot-value", "@example_channel"]
+        names = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+        process = self.process(telegram=True, clipboard=True, traced=True)
+        for name, value in zip(names, values):
+            process.expect(name)
+            process.expect("Copy the value, then press Enter: ")
+            self.clipboard.write_text(value)
+            process.send("")
+        self.assertEqual(process.finish(), 0)
+        records = self.records()
+        self.assertEqual([r["args"][2] for r in records], names)
+        for record, value in zip(records, values):
+            self.assertEqual(record["digest"], hashlib.sha256(value.encode()).hexdigest())
+            self.assertNotIn(value.encode(), process.output)
 
     def test_noninteractive_input_rejected(self):
         result = subprocess.run(["zsh", "-f", str(SCRIPT)], input=b"synthetic\n", env=self.env,

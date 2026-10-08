@@ -5,12 +5,17 @@ setopt ERREXIT NOUNSET PIPEFAIL
 umask 077
 
 typeset release_use_clipboard=false
-if [[ ${1:-} == --clipboard ]]; then
-  release_use_clipboard=true
+typeset release_telegram=false
+while [[ ${1:-} == --* ]]; do
+  case $1 in
+    --clipboard) release_use_clipboard=true ;;
+    --telegram) release_telegram=true ;;
+    *) print -u2 -- 'Supported options: --clipboard, --telegram'; exit 1 ;;
+  esac
   shift
-fi
+done
 if (( $# > 1 )); then
-  print -u2 -- 'Usage: zsh -f scripts/setup-release-secrets.zsh [--clipboard] [OWNER/REPO]'
+  print -u2 -- 'Usage: zsh -f scripts/setup-release-secrets.zsh [--clipboard] [--telegram] [OWNER/REPO]'
   exit 1
 fi
 if [[ ! -t 0 ]]; then
@@ -131,7 +136,14 @@ upload_secret() {
   print -- "Saved $secret_name."
 }
 
-print -- "Saving six Actions secrets to $release_repo. Existing values will be replaced."
+typeset -a release_secret_names
+if [[ $release_telegram == true ]]; then
+  release_secret_names=(TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID)
+else
+  release_secret_names=(BUILD_CERTIFICATE_BASE64 P12_PASSWORD NOTARY_KEY_BASE64
+                        NOTARY_KEY_ID NOTARY_ISSUER_ID SPARKLE_PRIVATE_KEY)
+fi
+print -- "Saving ${#release_secret_names} Actions secrets to $release_repo. Existing values will be replaced."
 if [[ $release_use_clipboard == true ]]; then
   print -- 'For each secret: copy it from your secret store, return here and press Enter.'
   print -- 'The clipboard is read only after Enter. Do not paste into the terminal.'
@@ -139,8 +151,7 @@ else
   print -- 'Input is invisible, including pasted text. Press Enter after each value.'
   print -- 'For long base64 values, use @/path/to/file or rerun with --clipboard on macOS.'
 fi
-for release_secret_name in BUILD_CERTIFICATE_BASE64 P12_PASSWORD NOTARY_KEY_BASE64 \
-                           NOTARY_KEY_ID NOTARY_ISSUER_ID SPARKLE_PRIVATE_KEY; do
+for release_secret_name in "${release_secret_names[@]}"; do
   upload_secret "$release_secret_name"
 done
-print -- '\nAll six release secrets saved.'
+print -- '\nAll selected secrets saved.'
