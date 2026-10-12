@@ -89,10 +89,12 @@ impl ConductorDb {
     ) -> Result<T, DbError> {
         let started = Instant::now();
         let mut inner = self.lock();
+        let waited = started.elapsed();
+        let reading = Instant::now();
         let result = inner
             .connection(&self.path)
             .and_then(|conn| f(conn).map_err(DbError::Query));
-        inner.note_duration(label, started.elapsed());
+        inner.note_duration(label, started.elapsed(), waited, reading.elapsed());
         result
     }
 
@@ -151,7 +153,13 @@ impl Inner {
         }
     }
 
-    fn note_duration(&mut self, label: &'static str, took: Duration) {
+    fn note_duration(
+        &mut self,
+        label: &'static str,
+        took: Duration,
+        waited: Duration,
+        reading: Duration,
+    ) {
         if took <= SLOW_READ {
             return;
         }
@@ -164,6 +172,9 @@ impl Inner {
             tracing::warn!(
                 label,
                 duration_ms = took.as_millis() as u64,
+                wait_ms = waited.as_millis() as u64,
+                // Includes connection checks/opening and the caller's SQLite closure.
+                read_ms = reading.as_millis() as u64,
                 suppressed = entry.suppressed,
                 "slow Conductor DB read"
             );

@@ -233,6 +233,14 @@ export const client = {
 		api<MessagesResponse>(`${routes.messages.path(sessionId)}?after=${after}`, {
 			headers: readingAs ? { [VIEWING_HEADER]: readingAs } : {}
 		}),
+	messagePage: (sessionId: string, window: { after?: number; before?: number } = {}, readingAs?: string | null) => {
+		const params = new URLSearchParams({ limit: '200' })
+		if (window.after !== undefined) params.set('after', String(window.after))
+		if (window.before !== undefined) params.set('before', String(window.before))
+		return api<MessagesResponse>(`${routes.messages.path(sessionId)}?${params}`, {
+			headers: readingAs ? { [VIEWING_HEADER]: readingAs } : {}
+		})
+	},
 	/** Exact last-turn context total plus estimated categories and fork payload sizes. */
 	contextBreakdown: (sessionId: string) => api<ContextBreakdownResponse>(routes.context.path(sessionId)),
 	toolUsage: (range: ToolUsageRange, refresh = false) =>

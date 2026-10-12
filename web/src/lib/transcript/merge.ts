@@ -1,6 +1,57 @@
 import { isToolResult } from '../../contract/shared.ts'
 import type { TranscriptEntry } from '../types.ts'
 
+// Parser ids append the numeric part index to the source frame id. Context pages
+// can supply a later part before the full frame arrives; insertion order is then wrong.
+const partIndex = (id: string) => Number(/:(\d+)$/.exec(id)?.[1] ?? 0)
+
+/** Keep raw results until an older page supplies their call; folding happens afterwards. */
+export function mergeMessagePages(prev: TranscriptEntry[], incoming: readonly TranscriptEntry[]): TranscriptEntry[] {
+	if (!incoming.length) return prev
+	const byId = new Map(prev.map(entry => [entry.id, entry]))
+	let changed = false
+	for (const entry of incoming) {
+		const existing = byId.get(entry.id)
+		if (!existing || (entry.question && entry.rowid < existing.rowid)) {
+			byId.set(entry.id, entry)
+			changed = true
+		}
+	}
+	return changed ? [...byId.values()].sort((a, b) => a.rowid - b.rowid || partIndex(a.id) - partIndex(b.id)) : prev
+}
+
+/** Refresh a preloaded copy with durable entries that arrived while its menu stayed open. */
+export function currentCopyEntries(
+	full: readonly TranscriptEntry[],
+	current: readonly TranscriptEntry[]
+): TranscriptEntry[] {
+	const latest = new Map(current.filter(entry => !entry.queued).map(entry => [entry.id, entry]))
+	const saved = full
+		.filter(entry => !entry.queued)
+		.map(entry => {
+			const update = latest.get(entry.id)
+			if (!update) return entry
+			// The preload can be ahead of the next poll, or carry a result outside the
+			// visible window. An incomplete context call must not erase that output.
+			return update.tool && !('output' in update) && 'output' in entry ? entry : update
+		})
+	const ids = new Set(saved.map(entry => entry.id))
+	return mergeMessagePages(
+		saved,
+		[...latest.values()].filter(entry => !ids.has(entry.id))
+	)
+}
+
+/** Reuse unchanged folded entries so older-page loading does not redraw every code block. */
+export function foldMessagePages(prev: readonly TranscriptEntry[], raw: readonly TranscriptEntry[]): TranscriptEntry[] {
+	const existing = new Map(prev.map(entry => [entry.id, entry]))
+	return mergeEntries([], raw).map(entry => {
+		const old = existing.get(entry.id)
+		const keys = Object.keys(entry) as (keyof TranscriptEntry)[]
+		return old && keys.length === Object.keys(old).length && keys.every(key => entry[key] === old[key]) ? old : entry
+	})
+}
+
 /**
  * Fold each tool result onto the call it answers.
  *

@@ -5,6 +5,7 @@ import { copyText } from '../../lib/clipboard.ts'
 import { cn } from '../../lib/cn.ts'
 import { elapsed, timeAgo, timestampMs } from '../../lib/format.ts'
 import { isLockedError } from '../../lib/lock.ts'
+import { currentCopyEntries } from '../../lib/transcript/merge.ts'
 import type { TranscriptEntry } from '../../lib/types.ts'
 import { UnlockLink } from '../ui.tsx'
 import type { TranscriptCut } from './TranscriptMenu.tsx'
@@ -28,7 +29,8 @@ export function ChatActions({
 	through,
 	onFork,
 	onCompact,
-	compactUnavailable
+	compactUnavailable,
+	loadEntries
 }: {
 	text: string
 	entries: TranscriptEntry[]
@@ -44,10 +46,15 @@ export function ChatActions({
 	onFork?: (format: SplitFormat) => Promise<void>
 	onCompact?: (format: SplitFormat) => Promise<void>
 	compactUnavailable?: string
+	/** A paged view must explicitly load the complete transcript before copying history. */
+	loadEntries?: () => Promise<TranscriptEntry[]>
 }) {
 	const [menuOpen, setMenuOpen] = useState<'copy' | 'fork' | 'compact' | null>(null)
 	const [copied, setCopied] = useState<'response' | 'chat' | null>(null)
 	const [copyError, setCopyError] = useState<string | null>(null)
+	const [fullEntries, setFullEntries] = useState<TranscriptEntry[] | null>(null)
+	const [historyError, setHistoryError] = useState(false)
+	const [historyRetry, setHistoryRetry] = useState(0)
 	const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const copyMenuButton = useRef<HTMLButtonElement>(null)
 	const forkMenuButton = useRef<HTMLButtonElement>(null)
@@ -56,6 +63,26 @@ export function ChatActions({
 	const [transferring, setTransferring] = useState<'fork' | 'compact' | null>(null)
 	const [forkError, setForkError] = useState<string | null>(null)
 	const [destination, setDestination] = useState<'chat' | 'workspace'>('chat')
+
+	// Preload on menu intent, so the eventual clipboard write stays inside the tap
+	// gesture on iOS. Never silently copy only the pages currently on screen.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: retry deliberately repeats the failed preload
+	useEffect(() => {
+		setFullEntries(null)
+		setHistoryError(false)
+		if (menuOpen !== 'copy' || !loadEntries) return
+		let alive = true
+		loadEntries()
+			.then(value => {
+				if (alive) setFullEntries(value)
+			})
+			.catch(() => {
+				if (alive) setHistoryError(true)
+			})
+		return () => {
+			alive = false
+		}
+	}, [menuOpen, loadEntries, historyRetry])
 
 	// An age in words goes stale where the elapsed timer above cannot: the transcript
 	// redraws when a row lands, and a finished turn has none coming. A minute is the
@@ -78,9 +105,10 @@ export function ChatActions({
 		try {
 			let value = text
 			if (!cut.only) {
+				if (loadEntries && !fullEntries) throw new Error('Full transcript is not loaded')
 				// The loaded transcript also contains the live outbox. Like Fork, copy only
 				// dispatched messages, and keep every entry of an older response's source row.
-				const saved = entries.filter(entry => !entry.queued)
+				const saved = currentCopyEntries(fullEntries ?? entries, entries)
 				const selected = through === undefined ? saved : transcriptThrough(saved, through)?.entries
 				if (!selected) throw new Error('Response no longer available')
 				value = renderTranscript(selected, cut).text
@@ -147,7 +175,22 @@ export function ChatActions({
 					</div>
 					{menuOpen === 'copy' ? (
 						<TranscriptMenu label="Copy options" anchor={copyMenuButton} onClose={() => setMenuOpen(null)}>
-							<TranscriptOptions onSelect={cut => void copy(cut)} />
+							{loadEntries && !fullEntries ? (
+								historyError ? (
+									<button
+										type="button"
+										className="px-3 py-2 text-xs text-del"
+										onClick={() => setHistoryRetry(value => value + 1)}
+									>
+										Could not load full transcript. Retry
+									</button>
+								) : (
+									<div role="status" className="px-3 py-2 text-xs text-faint">
+										Loading full transcript…
+									</div>
+								)
+							) : null}
+							<TranscriptOptions historyReady={!loadEntries || !!fullEntries} onSelect={cut => void copy(cut)} />
 						</TranscriptMenu>
 					) : null}
 				</div>

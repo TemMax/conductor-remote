@@ -33,7 +33,7 @@ describe('interactive questions in the transcript', () => {
 				{ e: step, children: [] },
 				{ e: question, children: [] }
 			]).map(r => r.kind)
-		).toEqual(['entry', 'entry'])
+		).toEqual(['steps', 'entry'])
 	})
 })
 

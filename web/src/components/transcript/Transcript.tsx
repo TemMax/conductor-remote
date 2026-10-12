@@ -1,10 +1,18 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSendPrompt } from '../../hooks/send.ts'
+import type { TranscriptState } from '../../hooks/transcript.ts'
 import { useTranscript } from '../../hooks/transcript.ts'
+import { useTranscriptRows } from '../../hooks/transcript-rows.ts'
 import { client } from '../../lib/api.ts'
 import { isUnconfirmed, pendingMatchesTranscript } from '../../lib/prompts/pending.ts'
 import { assistantTurnEnds, latestAssistantForActions, turnOrigin } from '../../lib/transcript/actions.ts'
+import { mergeEntries } from '../../lib/transcript/merge.ts'
+import {
+	captureTranscriptAnchor,
+	restoreTranscriptAnchor,
+	type TranscriptScrollAnchor
+} from '../../lib/transcript/scroll-anchor.ts'
 import { transcriptSubagents, transcriptTree } from '../../lib/transcript/tree.ts'
 import type { BackgroundTask, PendingPrompt } from '../../lib/types.ts'
 import { useApp } from '../../store.ts'
@@ -13,7 +21,7 @@ import { WaitingIndicator, WorkingIndicator } from './ActivityIndicator.tsx'
 import { AgentSubtabStrip } from './AgentSubtabStrip.tsx'
 import { ChatActions } from './ChatActions.tsx'
 import { NodeEntry, PendingEntry, QueuedEntry, StepGroup, SubagentResult, subagentFinal } from './entries.tsx'
-import { groupSteps, rowKey } from './grouping.ts'
+import { rowKey } from './grouping.ts'
 import { MessageNav } from './MessageNav.tsx'
 import { QuestionCard } from './QuestionCard.tsx'
 import { TranscriptHistory } from './TranscriptHistory.tsx'
@@ -74,7 +82,8 @@ export function Transcript({
 	/** Native children share this session; selection addresses their durable tool call instead. */
 	onSelectSubagent?: (toolUseId: string | null) => void
 }) {
-	const { entries, pendingQuestion, loading, error } = useTranscript(sessionId, poll ?? true)
+	const transcript = useTranscript(sessionId, poll ?? true)
+	const { entries, pendingQuestion, loading, error, hasOlder, loadingOlder, olderError, loadOlder } = transcript
 	const pending = useApp(s => s.pending)
 	const removePending = useApp(s => s.removePending)
 	const sendPrompt = useSendPrompt()
@@ -84,10 +93,28 @@ export function Transcript({
 	const queryClient = useQueryClient()
 	const scroller = useRef<HTMLDivElement>(null)
 	const atBottom = useRef(true)
-	const historyLayout = useCallback(() => {
+	const scrollAnchor = useRef<TranscriptScrollAnchor | null>(null)
+	const prependBusy = useRef(false)
+	const lastScrollTop = useRef(0)
+	const touchY = useRef<number | null>(null)
+	const [historyCount, setHistoryCount] = useState(0)
+	const historyPagination = useRef(new Map<string, TranscriptState>())
+	const shownHistory = historySessionIds.slice(-historyCount || historySessionIds.length)
+	const historyLayout = useCallback((stillLoading: boolean) => {
 		const el = scroller.current
-		if (el && atBottom.current) el.scrollTop = el.scrollHeight
+		if (!el) return
+		if (scrollAnchor.current) {
+			restoreTranscriptAnchor(el, scrollAnchor.current)
+			if (!stillLoading) {
+				scrollAnchor.current = null
+				prependBusy.current = false
+			}
+		} else if (atBottom.current) el.scrollTop = el.scrollHeight
 	}, [])
+	const loadEntries = useCallback(
+		async () => (sessionId ? mergeEntries([], (await client.messages(sessionId, 0)).entries) : []),
+		[sessionId]
+	)
 
 	// Conductor interleaves a native agent's frames with its parent's, but gives every
 	// child a durable pointer back to the spawning tool call. Rebuild that hierarchy,
@@ -103,7 +130,7 @@ export function Transcript({
 	// Grouping is pure of `entries`, and `entries` only changes when a row actually
 	// lands — so this holds the row list (and each group's slice) at the same identity
 	// across the polls above, which is what lets the memoised rows below bail out.
-	const rows = useMemo(() => groupSteps(visibleNodes), [visibleNodes])
+	const rows = useTranscriptRows(visibleNodes)
 	// The newest turn's Copy/Fork is drawn *after* every row rather than under its
 	// response: an agent that speaks and then keeps working buries the buttons
 	// mid-transcript, where they read as belonging to the step below them. Older turns
@@ -125,8 +152,10 @@ export function Transcript({
 	// A copied/stale URL can name a tool call this transcript no longer contains. Wait
 	// for the initial read before clearing it, then fail open to the real parent chat.
 	useEffect(() => {
-		if (selectedSubagentId && !loading && !selectedSubagent) onSelectSubagent?.(null)
-	}, [selectedSubagentId, selectedSubagent, loading, onSelectSubagent])
+		if (!selectedSubagentId || loading || selectedSubagent) return
+		if (hasOlder && !loadingOlder && !olderError) void loadOlder()
+		else if (!hasOlder) onSelectSubagent?.(null)
+	}, [selectedSubagentId, selectedSubagent, loading, hasOlder, loadingOlder, olderError, loadOlder, onSelectSubagent])
 
 	// The relay owns the entry, so dropping it is a request, not a local edit. A
 	// parked prompt (lock screen) belongs to its chat, a first prompt to its workspace.
@@ -174,23 +203,51 @@ export function Transcript({
 	}, [entries, pending, sessionId, removePending])
 
 	// Track whether the user is pinned to the bottom before new content lands.
+	const requestOlder = async (retry = false) => {
+		const el = scroller.current
+		if (!el || prependBusy.current || loading || (!retry && el.scrollTop > 160)) return
+		const target = !showingSubagent && shownHistory.length ? historyPagination.current.get(shownHistory[0]) : transcript
+		if (!target || target.loading || target.loadingOlder || (!retry && target.olderError)) return
+		if (!target.hasOlder && (showingSubagent || historyCount >= historySessionIds.length)) return
+		atBottom.current = false
+		scrollAnchor.current = captureTranscriptAnchor(el)
+		prependBusy.current = true
+		if (target.hasOlder) {
+			await target.loadOlder()
+			prependBusy.current = false
+		} else setHistoryCount(count => Math.min(count + 1, historySessionIds.length))
+	}
 	const onScroll = () => {
 		const el = scroller.current
 		if (!el) return
 		atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+		const upward = el.scrollTop < lastScrollTop.current
+		lastScrollTop.current = el.scrollTop
+		if (upward) void requestOlder()
 	}
 
 	const waitingCount = waiting?.length ?? 0
 	// biome-ignore lint/correctness/useExhaustiveDependencies: fire on new entries, view selection, a new optimistic bubble, or an indicator toggling to keep the view pinned
 	useLayoutEffect(() => {
 		const el = scroller.current
-		if (el && atBottom.current) el.scrollTop = el.scrollHeight
-	}, [entries, visiblePending.length, working, waitingCount, selectedSubagentId])
+		if (el && scrollAnchor.current) {
+			restoreTranscriptAnchor(el, scrollAnchor.current)
+			if (!loadingOlder && !loading) scrollAnchor.current = null
+		} else if (el && atBottom.current) el.scrollTop = el.scrollHeight
+	}, [entries, loadingOlder, visiblePending.length, working, waitingCount, selectedSubagentId])
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reset scroll intent when switching real or virtual sessions
 	useEffect(() => {
 		atBottom.current = true
+		lastScrollTop.current = 0
+		scrollAnchor.current = null
+		prependBusy.current = false
 	}, [sessionId, selectedSubagentId])
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a new real session starts with no mounted prior contexts
+	useEffect(() => {
+		setHistoryCount(0)
+		historyPagination.current.clear()
+	}, [sessionId])
 
 	// The scroller shrinks when the software keyboard opens (useVisualViewportHeight
 	// resizes the whole column) and when the composer autogrows. Without this, its
@@ -210,7 +267,7 @@ export function Transcript({
 	// waiting on that setup, showing it beats an empty pane that looks like a loss.
 	if (!sessionId && !showQueued) return <Empty>No active session in this workspace.</Empty>
 
-	const parentEmpty = entries.length === 0 && visiblePending.length === 0 && !showQueued
+	const parentEmpty = entries.length === 0 && visiblePending.length === 0 && !showQueued && !pendingQuestion
 	const subagentEmpty = showingSubagent && visibleNodes.length === 0 && !selectedSubagentFinal
 	const empty = showingSubagent ? subagentEmpty : parentEmpty
 	const nativeTabs = subagents.map(subagent => {
@@ -231,17 +288,49 @@ export function Transcript({
 		<div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
 			<AgentSubtabStrip tabs={nativeTabs} label="Subagents" />
 			<div className="relative flex min-h-0 min-w-0 flex-1">
-				<div
+				<section
 					ref={scroller}
+					aria-label="Conversation"
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll region needs focus for keyboard scrolling
+					tabIndex={0}
 					onScroll={onScroll}
+					onWheel={event => {
+						if (event.deltaY < 0) void requestOlder()
+					}}
+					onTouchStart={event => {
+						touchY.current = event.touches[0]?.clientY ?? null
+					}}
+					onTouchMove={event => {
+						const y = event.touches[0]?.clientY
+						if (y !== undefined && touchY.current !== null && y > touchY.current + 8) void requestOlder()
+						touchY.current = y ?? null
+					}}
+					onKeyDown={event => {
+						if (event.target === event.currentTarget && ['ArrowUp', 'PageUp', 'Home'].includes(event.key))
+							void requestOlder()
+					}}
 					className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3"
 					data-subagent-transcript={selectedSubagent?.label}
 				>
 					{!showingSubagent
-						? historySessionIds.map(id => (
-								<TranscriptHistory key={id} sessionId={id} onLayout={historyLayout} onFork={onFork} />
+						? shownHistory.map(id => (
+								<TranscriptHistory
+									key={id}
+									sessionId={id}
+									onLayout={historyLayout}
+									onFork={onFork}
+									onPagination={state => {
+										historyPagination.current.set(id, state)
+									}}
+								/>
 							))
 						: null}
+					{loadingOlder ? <Spinner label="Loading earlier messages…" /> : null}
+					{olderError ? (
+						<button type="button" className="py-2 text-xs text-del" onClick={() => void requestOlder(true)}>
+							Could not load earlier messages. Retry
+						</button>
+					) : null}
 					{loading && empty ? (
 						<Spinner label="Loading transcript…" />
 					) : error && empty ? (
@@ -249,14 +338,16 @@ export function Transcript({
 					) : subagentEmpty ? (
 						<Empty>No activity from this agent yet.</Empty>
 					) : empty && !working ? (
-						<Empty>No messages yet.</Empty>
+						<Empty>{hasOlder ? 'Scroll up to load earlier messages.' : 'No messages yet.'}</Empty>
 					) : (
 						<div className="flex min-w-0 flex-col gap-2.5">
 							{rows.map(row =>
 								row.kind === 'steps' ? (
-									<StepGroup key={row.key} nodes={row.nodes} />
+									<div key={row.key} data-transcript-row={row.key}>
+										<StepGroup nodes={row.nodes} />
+									</div>
 								) : (
-									<Fragment key={row.key}>
+									<div key={row.key} data-transcript-row={row.key} className="flex min-w-0 flex-col gap-2.5">
 										{row.node.e.question ? (
 											<QuestionCard
 												request={row.node.e.question}
@@ -282,9 +373,10 @@ export function Transcript({
 												rowid={row.node.e.rowid}
 												through={row.node.e.rowid}
 												onFork={onFork}
+												loadEntries={hasOlder ? loadEntries : undefined}
 											/>
 										) : null}
-									</Fragment>
+									</div>
 								)
 							)}
 							{selectedSubagentFinal && selectedSubagent ? (
@@ -299,8 +391,22 @@ export function Transcript({
 									rowid={actionTarget.rowid}
 									working={working}
 									onFork={onFork}
+									loadEntries={hasOlder ? loadEntries : undefined}
 									onCompact={onCompact}
 									compactUnavailable={cannotCompact}
+								/>
+							) : null}
+							{!showingSubagent &&
+							pendingQuestion &&
+							!entries.some(
+								entry =>
+									entry.question?.provider === pendingQuestion.provider && entry.question.id === pendingQuestion.id
+							) ? (
+								<QuestionCard
+									request={pendingQuestion}
+									sessionId={sessionId}
+									workspaceId={workspaceId}
+									active={!error && poll !== false}
 								/>
 							) : null}
 							{!showingSubagent
@@ -351,7 +457,7 @@ export function Transcript({
 							{!showingSubagent && working ? <WorkingIndicator since={workingSince} /> : null}
 						</div>
 					)}
-				</div>
+				</section>
 				{!showingSubagent ? (
 					/* Reads the transcript's own DOM (`data-user-msg`), so it needs no entry list of its own. */
 					<MessageNav scroller={scroller} />

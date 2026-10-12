@@ -1,21 +1,26 @@
-import { Fragment, memo, useLayoutEffect, useMemo, useState } from 'react'
-import { useTranscript } from '../../hooks/transcript.ts'
+import { memo, useCallback, useLayoutEffect, useMemo, useState } from 'react'
+import { type TranscriptState, useTranscript } from '../../hooks/transcript.ts'
+import { useTranscriptRows } from '../../hooks/transcript-rows.ts'
+import { client } from '../../lib/api.ts'
 import { assistantTurnEnds, latestAssistantForActions, turnOrigin } from '../../lib/transcript/actions.ts'
+import { mergeEntries } from '../../lib/transcript/merge.ts'
 import { transcriptSubagents, transcriptTree } from '../../lib/transcript/tree.ts'
 import { Spinner } from '../ui.tsx'
 import { ChatActions } from './ChatActions.tsx'
 import { NodeEntry, StepGroup, SubagentResult, subagentFinal } from './entries.tsx'
-import { groupSteps, rowKey } from './grouping.ts'
+import { rowKey } from './grouping.ts'
 import type { SplitFormat } from './types.ts'
 
 /** Earlier contexts share the live transcript's scroller and renderer, never an attachment viewer. */
 export const TranscriptHistory = memo(function TranscriptHistory({
 	sessionId,
 	onLayout,
+	onPagination,
 	onFork
 }: {
 	sessionId: string
-	onLayout?: () => void
+	onLayout?: (loading: boolean) => void
+	onPagination?: (state: TranscriptState) => void
 	onFork?: (format: SplitFormat) => Promise<void>
 }) {
 	// The completed context is read once. Only the newest chat keeps the 1s poll.
@@ -27,7 +32,7 @@ export const TranscriptHistory = memo(function TranscriptHistory({
 		() => transcriptSubagents(nodes).find(agent => agent.id === selectedAgent),
 		[nodes, selectedAgent]
 	)
-	const rows = useMemo(() => groupSteps(subagent?.node.children ?? nodes), [nodes, subagent])
+	const rows = useTranscriptRows(subagent?.node.children ?? nodes)
 	const rootEntries = useMemo(() => nodes.map(node => node.e), [nodes])
 	const actions = useMemo(() => new Set(assistantTurnEnds(rootEntries).map(rowKey)), [rootEntries])
 	const latest = useMemo(() => latestAssistantForActions(rootEntries), [rootEntries])
@@ -36,10 +41,24 @@ export const TranscriptHistory = memo(function TranscriptHistory({
 	// Fetching an older segment increases scrollHeight, not the scroller's height.
 	// Tell its owner after layout so a reader at the bottom stays with the composer.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: content/selection changes drive the layout notification
-	useLayoutEffect(() => onLayout?.(), [entries, transcript.loading, selectedAgent, onLayout])
+	useLayoutEffect(
+		() => onLayout?.(transcript.loading || transcript.loadingOlder),
+		[entries, transcript.loading, transcript.loadingOlder, selectedAgent, onLayout]
+	)
+	useLayoutEffect(() => onPagination?.(transcript), [transcript, onPagination])
+	const loadEntries = useCallback(
+		async () => mergeEntries([], (await client.messages(sessionId, 0)).entries),
+		[sessionId]
+	)
 
 	return (
 		<section data-chat-history={sessionId} aria-label="Previous conversation context">
+			{transcript.loadingOlder ? <Spinner label="Loading earlier messages…" /> : null}
+			{transcript.olderError ? (
+				<button type="button" className="py-2 text-xs text-del" onClick={() => void transcript.loadOlder()}>
+					Could not load earlier messages. Retry
+				</button>
+			) : null}
 			{transcript.loading ? (
 				<Spinner label="Loading earlier conversation…" />
 			) : transcript.error ? (
@@ -53,9 +72,11 @@ export const TranscriptHistory = memo(function TranscriptHistory({
 					) : null}
 					{rows.map(row =>
 						row.kind === 'steps' ? (
-							<StepGroup key={row.key} nodes={row.nodes} />
+							<div key={row.key} data-transcript-row={row.key}>
+								<StepGroup nodes={row.nodes} />
+							</div>
 						) : (
-							<Fragment key={row.key}>
+							<div key={row.key} data-transcript-row={row.key}>
 								<NodeEntry node={row.node} onSelectSubagent={selectAgent} />
 								{!subagent && actions.has(rowKey(row.node.e)) ? (
 									<ChatActions
@@ -66,9 +87,10 @@ export const TranscriptHistory = memo(function TranscriptHistory({
 										rowid={row.node.e.rowid}
 										through={row.node.e === latest ? undefined : row.node.e.rowid}
 										onFork={onFork ? format => onFork({ ...format, sourceSessionId: sessionId }) : undefined}
+										loadEntries={transcript.hasOlder ? loadEntries : undefined}
 									/>
 								) : null}
-							</Fragment>
+							</div>
 						)
 					)}
 					{final ? <SubagentResult text={final} failed={!!subagent?.node.e.error} /> : null}
