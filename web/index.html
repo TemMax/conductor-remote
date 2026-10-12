@@ -8,6 +8,9 @@
 			// Keep the key and colors aligned with src/lib/theme.ts. This runs before the
 			// stylesheet so an explicit preference never flashes the opposite theme.
 			try {
+				// iOS home-screen apps have system chrome beyond the reported safe area.
+				// Mark them before CSS loads, including when theme storage is unavailable.
+				if (navigator.standalone === true) document.documentElement.dataset.iosStandalone = ''
 				const preference = localStorage.getItem('conductor-remote-theme')
 				if (preference === 'light' || preference === 'dark') document.documentElement.dataset.theme = preference
 				const dark =
