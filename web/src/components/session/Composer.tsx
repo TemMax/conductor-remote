@@ -143,7 +143,9 @@ export function Composer({
 		const el = ref.current
 		if (!el) return
 		el.style.height = 'auto'
-		el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+		// CSS owns the responsive cap; retain the full intrinsic height so changing
+		// width or breakpoint can grow the field again without editing the draft.
+		el.style.height = `${el.scrollHeight}px`
 	}
 
 	// Fit a restored — or externally stashed — draft, not just what's being typed.
@@ -332,7 +334,7 @@ export function Composer({
 					placeholder={disabled ? 'No active session' : 'Send a prompt…'}
 					// text-base is load-bearing: iOS auto-zooms the page when a field under 16px
 					// takes focus, and never zooms back out on blur.
-					className="block max-h-40 w-full resize-none bg-transparent px-2 py-1 text-base outline-none placeholder:text-faint disabled:opacity-50"
+					className="block max-h-[calc(3lh+0.5rem)] w-full resize-none bg-transparent px-2 py-1 text-base outline-none placeholder:text-faint disabled:opacity-50 md:pointer-fine:max-h-40"
 					onChange={e => setDraft(draftKey, e.target.value)}
 					onFocus={() => setFocusedDraft(draftKey)}
 					onBlur={() => {

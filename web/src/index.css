@@ -441,8 +441,14 @@
 }
 
 /* Safe-area padding for notches / home indicator. */
+html[data-ios-standalone] {
+	/* Installed iOS apps blur beyond the status-bar inset. Reserve that band
+	   in the layout so top controls stay clear. No top inset (e.g. landscape)
+	   means no extra band to reserve. */
+	--status-bar-clearance: min(24px, env(safe-area-inset-top, 0px));
+}
 .pt-safe {
-	padding-top: max(env(safe-area-inset-top), 0.5rem);
+	padding-top: calc(max(env(safe-area-inset-top, 0px), 0.5rem) + var(--status-bar-clearance, 0px));
 }
 .pb-safe {
 	padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
