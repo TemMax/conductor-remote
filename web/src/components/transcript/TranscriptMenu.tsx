@@ -83,7 +83,13 @@ export interface TranscriptCut {
 	only?: boolean
 }
 
-export function TranscriptOptions({ onSelect }: { onSelect: (cut: TranscriptCut) => void }) {
+export function TranscriptOptions({
+	onSelect,
+	historyReady = true
+}: {
+	onSelect: (cut: TranscriptCut) => void
+	historyReady?: boolean
+}) {
 	return (
 		<>
 			<TranscriptOption
@@ -93,16 +99,19 @@ export function TranscriptOptions({ onSelect }: { onSelect: (cut: TranscriptCut)
 			/>
 			<TranscriptOption
 				label="Concise"
+				disabled={!historyReady}
 				detail="Messages only"
 				onClick={() => onSelect({ thinking: false, tools: false })}
 			/>
 			<TranscriptOption
 				label="With reasoning"
+				disabled={!historyReady}
 				detail="Messages and reasoning"
 				onClick={() => onSelect({ thinking: true, tools: false })}
 			/>
 			<TranscriptOption
 				label="Full transcript"
+				disabled={!historyReady}
 				detail="Messages, reasoning, and tools"
 				onClick={() => onSelect({ thinking: true, tools: true })}
 			/>
@@ -110,13 +119,24 @@ export function TranscriptOptions({ onSelect }: { onSelect: (cut: TranscriptCut)
 	)
 }
 
-function TranscriptOption({ label, detail, onClick }: { label: string; detail: string; onClick: () => void }) {
+function TranscriptOption({
+	label,
+	detail,
+	onClick,
+	disabled = false
+}: {
+	label: string
+	detail: string
+	onClick: () => void
+	disabled?: boolean
+}) {
 	return (
 		<button
 			type="button"
 			role="menuitem"
 			onClick={onClick}
-			className="flex w-full flex-col px-3 py-2 text-left active:bg-surface-2"
+			disabled={disabled}
+			className="flex w-full flex-col px-3 py-2 text-left active:bg-surface-2 disabled:opacity-50"
 		>
 			<span className="text-[12px] font-medium text-text">{label}</span>
 			<span className="text-[11px] text-faint">{detail}</span>

@@ -306,6 +306,7 @@ async fn every_route_needs_the_token() {
             "/api/workspaces/ws-pinned/sessions",
             "/api/workspaces/ws-pinned/sessions/closed",
             "/api/sessions/msg-chat/messages?after=0",
+            "/api/sessions/msg-chat/messages?limit=200",
         ],
     )
     .await;
@@ -439,6 +440,214 @@ async fn messages_match_the_golden_file() {
 async fn messages_revalidate() {
     let relay = Relay::messages();
     assert_revalidates(&relay, "/api/sessions/msg-chat/messages?after=0").await;
+}
+
+#[tokio::test]
+async fn a_message_page_starts_at_the_tail_and_keeps_non_rendering_rows_in_its_cursors() {
+    let relay = Relay::messages();
+    let page = relay.ok("/api/sessions/msg-chat/messages?limit=2").await;
+    let ids: Vec<_> = page["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["msg-a3:0"]);
+    assert_eq!(page["cursor"], 9);
+    assert_eq!(page["oldestCursor"], 8);
+    assert_eq!(page["hasOlder"], true);
+    assert_eq!(page["hasMore"], false);
+    assert_eq!(page["queued"].as_array().unwrap().len(), 4);
+}
+
+#[tokio::test]
+async fn message_pages_walk_backwards_without_repeating_the_boundary() {
+    let relay = Relay::messages();
+    let page = relay
+        .ok("/api/sessions/msg-chat/messages?limit=2&before=8")
+        .await;
+    let rowids: Vec<_> = page["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["rowid"].as_i64().unwrap())
+        .collect();
+    assert_eq!(rowids, [5, 6]);
+    assert_eq!(page["oldestCursor"], 5);
+    assert_eq!(page["cursor"], 6);
+    assert_eq!(page["hasOlder"], true);
+}
+
+#[tokio::test]
+async fn forward_message_pages_report_more_until_the_cursor_reaches_the_end() {
+    let relay = Relay::messages();
+    let first = relay
+        .ok("/api/sessions/msg-chat/messages?limit=2&after=4")
+        .await;
+    assert_eq!(first["cursor"], 6);
+    assert_eq!(first["hasMore"], true);
+    let last = relay
+        .ok("/api/sessions/msg-chat/messages?limit=2&after=6")
+        .await;
+    assert_eq!(last["cursor"], 9);
+    assert_eq!(last["hasMore"], false);
+    let empty = relay
+        .ok("/api/sessions/msg-chat/messages?limit=2&after=9")
+        .await;
+    assert_eq!(empty["cursor"], 9);
+    assert_eq!(empty["hasMore"], false);
+    assert_eq!(empty["entries"], json!([]));
+}
+
+#[tokio::test]
+async fn a_page_carries_the_tool_call_for_a_result_whose_call_is_older() {
+    let relay = Relay::messages();
+    let page = relay
+        .ok("/api/sessions/msg-chat/messages?limit=1&before=5")
+        .await;
+    assert_eq!(page["entries"][0]["id"], "msg-r1:0");
+    let context = page["contextEntries"].as_array().unwrap();
+    assert_eq!(context.len(), 1);
+    assert_eq!(context[0]["id"], "msg-a1:2");
+    assert_eq!(context[0]["toolUseId"], "msg-tool-1");
+    assert_eq!(page["oldestCursor"], 4);
+}
+
+#[tokio::test]
+async fn a_page_keeps_nested_subagent_activity_attached_to_its_older_ancestors() {
+    let relay = Relay::messages();
+    for (id, frame) in [
+        (
+            "root-agent",
+            json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"root-call","name":"Agent","input":{"description":"Root worker"}}]}}),
+        ),
+        (
+            "nested-agent",
+            json!({"type":"assistant","parent_tool_use_id":"root-call","message":{"content":[{"type":"tool_use","id":"nested-call","name":"Agent","input":{"description":"Nested worker"}}]}}),
+        ),
+        (
+            "nested-text",
+            json!({"type":"assistant","parent_tool_use_id":"nested-call","message":{"content":[{"type":"text","text":"Synthetic child response"}]}}),
+        ),
+    ] {
+        relay.test.conn().execute("INSERT INTO session_messages(id,session_id,content,created_at,sent_at) VALUES(?1,?2,?3,'2026-01-01','2026-01-01')",rusqlite::params![id,seed_messages::CHAT,frame.to_string()]).unwrap();
+    }
+    let page = relay.ok("/api/sessions/msg-chat/messages?limit=1").await;
+    assert_eq!(page["entries"].as_array().unwrap().len(), 1);
+    let ids: Vec<_> = page["contextEntries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["toolUseId"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["root-call", "nested-call"]);
+}
+
+#[tokio::test]
+async fn malformed_and_oversized_limits_cannot_turn_a_page_into_a_full_history_read() {
+    let relay = Relay::messages();
+    let conn = relay.test.conn();
+    for index in 0..750 {
+        conn.execute("INSERT INTO session_messages(id,session_id,content,created_at,sent_at) VALUES(?1,?2,'Synthetic message','2026-01-01','2026-01-01')",rusqlite::params![format!("page-{index}"),seed_messages::CHAT]).unwrap();
+    }
+    for (limit, count) in [("abc", 200), ("0", 1), ("1000000", 500)] {
+        let page = relay
+            .ok(&format!("/api/sessions/msg-chat/messages?limit={limit}"))
+            .await;
+        assert_eq!(page["entries"].as_array().unwrap().len(), count);
+        assert_eq!(page["hasOlder"], true);
+    }
+}
+
+#[tokio::test]
+async fn repeated_pages_locate_a_known_older_tool_call_without_rescanning_content() {
+    use std::ffi::CStr;
+    use std::os::raw::{c_int, c_void};
+    unsafe extern "C" fn trace(
+        _: u32,
+        counter: *mut c_void,
+        statement: *mut c_void,
+        _: *mut c_void,
+    ) -> c_int {
+        // SQLite owns the statement for the callback; the counter stays alive until
+        // tracing is explicitly disabled below. No bound values are inspected.
+        let sql = unsafe { rusqlite::ffi::sqlite3_sql(statement.cast()) };
+        if !sql.is_null()
+            && unsafe { CStr::from_ptr(sql) }
+                .to_bytes()
+                .windows(9)
+                .any(|b| b == b"json_each")
+        {
+            unsafe { &*counter.cast::<AtomicUsize>() }.fetch_add(1, Ordering::Relaxed);
+        }
+        0
+    }
+    let relay = Relay::messages();
+    let counter = Box::new(AtomicUsize::new(0));
+    relay
+        .reads
+        .db()
+        .read("install test trace", |conn| {
+            // The read handle serializes use of the connection and counter is stable.
+            let code = unsafe {
+                rusqlite::ffi::sqlite3_trace_v2(
+                    conn.handle(),
+                    rusqlite::ffi::SQLITE_TRACE_STMT,
+                    Some(trace),
+                    (&*counter as *const AtomicUsize).cast_mut().cast(),
+                )
+            };
+            assert_eq!(code, rusqlite::ffi::SQLITE_OK);
+            Ok(())
+        })
+        .unwrap();
+    relay
+        .ok("/api/sessions/msg-chat/messages?limit=1&before=5")
+        .await;
+    relay
+        .ok("/api/sessions/msg-chat/messages?limit=1&before=5")
+        .await;
+    relay
+        .reads
+        .db()
+        .read("remove test trace", |conn| {
+            unsafe {
+                rusqlite::ffi::sqlite3_trace_v2(conn.handle(), 0, None, std::ptr::null_mut())
+            };
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn a_cached_context_call_is_revalidated_after_its_row_changes_or_disappears() {
+    let relay = Relay::messages();
+    relay
+        .ok("/api/sessions/msg-chat/messages?limit=1&before=5")
+        .await;
+    let replacement = json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"msg-tool-1","name":"Read","input":{"file_path":"src/changed.ts"}}]}}).to_string();
+    relay
+        .test
+        .conn()
+        .execute(
+            "UPDATE session_messages SET content=?1 WHERE id='msg-a1'",
+            [replacement],
+        )
+        .unwrap();
+    let updated = relay
+        .ok("/api/sessions/msg-chat/messages?limit=1&before=5")
+        .await;
+    assert_eq!(updated["contextEntries"][0]["detail"], "src/changed.ts");
+    relay
+        .test
+        .conn()
+        .execute("DELETE FROM session_messages WHERE id='msg-a1'", [])
+        .unwrap();
+    let deleted = relay
+        .ok("/api/sessions/msg-chat/messages?limit=1&before=5")
+        .await;
+    assert!(deleted.get("contextEntries").is_none());
 }
 
 #[tokio::test]

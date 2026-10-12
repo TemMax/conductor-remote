@@ -1,5 +1,5 @@
 import { Waypoints } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { cn } from '../../lib/cn.ts'
 import { messagePreview, messageTime } from '../../lib/format.ts'
 import type { PendingMessage } from '../../lib/prompts/pending.ts'
@@ -28,11 +28,25 @@ const sameNodes = (a: { nodes: TranscriptNode[] }, b: { nodes: TranscriptNode[] 
  * each time the live group grows by one step.
  */
 export const StepGroup = memo(function StepGroup({ nodes }: { nodes: TranscriptNode[] }) {
+	const singleton = nodes.length === 1
+	const [open, setOpen] = useState(singleton)
 	const failed = nodes.filter(node => node.e.error).length
 	const labels = [...new Set(nodes.map(({ e }) => (e.role === 'thinking' ? 'Thinking' : e.text)))].join(', ')
 	return (
-		<details className="group/steps min-w-0 overflow-hidden rounded-xl border border-border-soft bg-surface/40">
-			<summary className="flex cursor-pointer select-none list-none items-baseline gap-2 overflow-hidden whitespace-nowrap px-3 py-1.5 [&::-webkit-details-marker]:hidden">
+		<details
+			open={open}
+			onToggle={event => setOpen(event.currentTarget.open)}
+			className={cn(
+				'group/steps min-w-0 overflow-hidden',
+				!singleton && 'rounded-xl border border-border-soft bg-surface/40'
+			)}
+		>
+			<summary
+				className={cn(
+					'flex cursor-pointer select-none list-none items-baseline gap-2 overflow-hidden whitespace-nowrap px-3 py-1.5 [&::-webkit-details-marker]:hidden',
+					singleton && 'hidden'
+				)}
+			>
 				<span className="shrink-0 font-mono text-[11px] text-faint transition-transform group-open/steps:rotate-90">
 					▸
 				</span>
@@ -40,11 +54,15 @@ export const StepGroup = memo(function StepGroup({ nodes }: { nodes: TranscriptN
 				<span className="min-w-0 flex-1 truncate text-[11px] text-faint group-open/steps:invisible">{labels}</span>
 				{failed ? <span className="shrink-0 text-[11px] text-del">{failed} failed</span> : null}
 			</summary>
-			<div className="flex min-w-0 flex-col gap-2.5 border-t border-border-soft px-2 py-2.5">
-				{nodes.map(node => (
-					<NodeEntry key={rowKey(node.e)} node={node} />
-				))}
-			</div>
+			{open ? (
+				<div className={cn('flex min-w-0 flex-col gap-2.5', !singleton && 'border-t border-border-soft px-2 py-2.5')}>
+					{nodes.map(node => (
+						<div key={rowKey(node.e)} data-transcript-step={rowKey(node.e)}>
+							<NodeEntry node={node} />
+						</div>
+					))}
+				</div>
+			) : null}
 		</details>
 	)
 }, sameNodes)
@@ -243,20 +261,7 @@ const Entry = memo(function Entry({ e }: { e: TranscriptEntry }) {
 		)
 	}
 	if (e.role === 'tool') return <ToolEntry e={e} />
-	if (e.role === 'thinking') {
-		// Named group: a plain `group` would also answer to the enclosing StepGroup's open state.
-		return (
-			<details className="group/think px-1">
-				<summary className="cursor-pointer select-none list-none text-[11px] font-semibold uppercase tracking-wide text-faint [&::-webkit-details-marker]:hidden">
-					<span className="mr-1 inline-block transition-transform group-open/think:rotate-90">▸</span>
-					Thinking
-				</summary>
-				<div className="mt-1 border-l-2 border-border-soft pl-3 text-[13px] italic leading-relaxed text-muted">
-					<Markdown>{e.text}</Markdown>
-				</div>
-			</details>
-		)
-	}
+	if (e.role === 'thinking') return <ThinkingEntry text={e.text} />
 	if (e.role === 'system') {
 		return <div className="px-2 text-center text-[11px] text-faint">{e.text}</div>
 	}
@@ -272,3 +277,20 @@ const Entry = memo(function Entry({ e }: { e: TranscriptEntry }) {
 		</div>
 	)
 })
+
+function ThinkingEntry({ text }: { text: string }) {
+	const [open, setOpen] = useState(false)
+	return (
+		<details open={open} onToggle={event => setOpen(event.currentTarget.open)} className="group/think px-1">
+			<summary className="cursor-pointer select-none list-none text-[11px] font-semibold uppercase tracking-wide text-faint [&::-webkit-details-marker]:hidden">
+				<span className="mr-1 inline-block transition-transform group-open/think:rotate-90">▸</span>
+				Thinking
+			</summary>
+			{open ? (
+				<div className="mt-1 border-l-2 border-border-soft pl-3 text-[13px] italic leading-relaxed text-muted">
+					<Markdown>{text}</Markdown>
+				</div>
+			) : null}
+		</details>
+	)
+}

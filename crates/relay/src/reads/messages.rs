@@ -9,6 +9,9 @@ use crate::transcript::{
     parse_message, parse_outbox_message, StoredMessage, StoredOutboxMessage, TranscriptEntry,
 };
 
+mod page;
+pub use page::{MessagePage, MessageWindow};
+
 /// What the phone polls for: the TypeScript `MessagesResponse`. Field order is the order of
 /// the keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -33,9 +36,10 @@ const MESSAGE_BATCH_ROWS: usize = 500;
 const MESSAGES_SQL: &str = "\
 SELECT rowid, id, content, created_at, sent_at, queue_order
  FROM session_messages
- WHERE session_id = ?1 AND rowid > ?2
- ORDER BY rowid ASC
- LIMIT ?3";
+ WHERE rowid IN (SELECT rowid FROM session_messages
+                  WHERE session_id = ?1 AND rowid > ?2
+                  ORDER BY rowid ASC LIMIT ?3)
+ ORDER BY rowid ASC";
 
 /// Whether this database has the outbox table; older builds and rollbacks do not.
 const OUTBOX_PROBE_SQL: &str = "\

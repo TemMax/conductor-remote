@@ -24,6 +24,16 @@ The relay reads Conductor's SQLite database read-only and looks for its workspac
 
 The database is opened on the first read after Conductor runs and closed when Conductor quits. While Conductor is not running the read routes answer 503 and `GET /api/state` answers without workspaces.
 
+### Transcript windows
+
+`GET /api/sessions/<id>/messages?limit=200` returns the newest source rows in chronological order. `before=<oldestCursor>` loads an older window; `after=<cursor>` reads new rows. Both bounds are exclusive. Limits are clamped to 1–500. `hasOlder` describes backward pagination and `hasMore` signals another forward batch. Cursors include source rows that produce no visible entries. `contextEntries` supplies older tool calls needed to attach results or identify native subagents; it is not an older history page. Outbox and pending questions remain independent snapshots.
+
+The web client loads older windows when the reader scrolls upward near the top. Previous conversation contexts mount only after the current context is exhausted. Closed step bodies are not mounted. Requests without `limit` retain the complete-history behavior used by copying and older clients; copying preloads that history before enabling its history choices so the clipboard write remains in the tap gesture.
+
+Slow database read logs include `duration_ms`, `wait_ms` for the shared connection lock, and `read_ms` for connection setup and the read closure. The latter can include parsing; it is not a pure SQLite execution timer. Message queries select a bounded set of rowids before fetching large content columns.
+
+The relay already builds bundled SQLite through `rusqlite`. Keep its thread safety enabled: the relay uses connections from multiple threads. Any future compile-flag change should verify the effective `PRAGMA compile_options` and benchmark representative queries against the same data and SQLite version. Do not copy another application's omission flags or change Conductor's schema, journal mode, or durability settings to optimize these read-only routes. See [SQLite compile options](https://www.sqlite.org/compile.html) and [threading modes](https://www.sqlite.org/threadsafe.html).
+
 ### Facts outside the database
 
 Change statistics, pull-request state, Run tasks and the background tasks of a chat are not in Conductor's database. The relay calls three programs for them:

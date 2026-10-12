@@ -13,6 +13,7 @@ use crate::db::DbError;
 use crate::delivery::WriteService;
 use crate::files::{file_preview, local_image, ImageError, PreviewError};
 use crate::reads::extras::commands::{Commands, SystemCommands};
+use crate::reads::messages::MessageWindow;
 use crate::reads::review::diff::{
     list_source_files, workspace_diff, workspace_file_diff, WorkspaceFiles,
 };
@@ -60,6 +61,7 @@ enum Target {
     Messages {
         session: String,
         after: i64,
+        page: Option<(MessageWindow, usize)>,
     },
     RepoIcon(String),
     ToolImage(String),
@@ -172,6 +174,17 @@ impl Target {
         match_param(path, SESSIONS, "/messages").map(|session| Self::Messages {
             session,
             after: after(query),
+            page: form_value(query, "limit").map(|value| {
+                let limit = value.parse::<usize>().unwrap_or(200).clamp(1, 500);
+                let window = if let Some(before) = form_value(query, "before") {
+                    MessageWindow::Before(before.parse().unwrap_or(0))
+                } else if form_value(query, "after").is_some() {
+                    MessageWindow::After(after(query))
+                } else {
+                    MessageWindow::Latest
+                };
+                (window, limit)
+            }),
         })
     }
 }
@@ -537,7 +550,14 @@ fn read(
                 sessions: reads.list_closed_sessions(&id)?,
             })
         }
-        Target::Messages { session, after } => ok(&reads.get_messages(&session, after)?),
+        Target::Messages {
+            session,
+            after,
+            page,
+        } => match page {
+            Some((window, limit)) => ok(&reads.get_message_page(&session, window, limit)?),
+            None => ok(&reads.get_messages(&session, after)?),
+        },
         Target::RepoIcon(name) => match reads.repo_icon(&name)? {
             Some(icon) => Ok(Answer::Bytes {
                 content_type: icon.content_type.to_owned(),
@@ -866,6 +886,7 @@ mod tests {
             Target::Messages {
                 session: "s-1".into(),
                 after: 0,
+                page: None,
             }
             .kind(),
             Target::RepoIcon("r-1".into()).kind(),

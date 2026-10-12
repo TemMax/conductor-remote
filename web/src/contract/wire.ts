@@ -224,6 +224,12 @@ export interface MessagesResponse {
 	/** Full current snapshot of Conductor's queue-mode message outbox. */
 	queued?: TranscriptEntry[]
 	cursor: number
+	/** Present only for bounded transcript requests; older relays omit page metadata. */
+	oldestCursor?: number
+	hasOlder?: boolean
+	hasMore?: boolean
+	/** Older tool calls needed to pair results and attach subagents across a page boundary. */
+	contextEntries?: TranscriptEntry[]
 }
 
 /** GET /api/sessions/:id/context — exact total plus estimated composition and fork sizes. */

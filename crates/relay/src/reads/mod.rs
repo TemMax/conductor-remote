@@ -14,8 +14,9 @@ pub mod snapshot;
 pub mod states;
 pub mod workspaces;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 
@@ -37,6 +38,8 @@ pub struct Reads {
     preview: Option<(PreviewRoots, ExposeMode)>,
     search: Option<Arc<SearchIndex>>,
     usage: Option<Usage>,
+    // Only row identities, never message bodies. Hits are re-read and validated.
+    message_call_rows: Mutex<HashMap<(String, String), (i64, String)>>,
 }
 
 /// The two services behind the usage sheet.
@@ -74,6 +77,7 @@ impl Reads {
             preview: None,
             search: None,
             usage: None,
+            message_call_rows: Mutex::default(),
         }
     }
 

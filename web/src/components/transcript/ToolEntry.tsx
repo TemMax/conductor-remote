@@ -75,45 +75,50 @@ export const ToolEntry = memo(function ToolEntry({ e }: { e: TranscriptEntry }) 
 				) : null}
 				{e.error ? <span className="ml-auto shrink-0 text-[11px] text-del">failed</span> : null}
 			</summary>
-			<div className="flex min-w-0 flex-col gap-2 border-t border-border-soft px-3 py-2">
-				{e.detail ? (
-					source ? (
-						<ChatLink
-							href={source}
-							title={`Open ${e.detail}`}
-							className="block whitespace-pre-wrap font-mono text-[11.5px] leading-relaxed text-accent underline underline-offset-2 [overflow-wrap:anywhere]"
-						>
-							{e.detail}
-						</ChatLink>
-					) : (
-						<Mono text={e.detail} className="text-muted" language={languageForTool(e.tool)} />
-					)
-				) : null}
-				{e.output ? (
-					<div className={cn('min-w-0', e.detail && 'border-t border-border-soft pt-2')}>
-						<Label>{e.error ? 'error' : e.diff ? 'changes' : 'output'}</Label>
-						{e.diff ? (
-							<Patch patch={e.output} fileName={e.detail} />
+			{open ? (
+				<div className="flex min-w-0 flex-col gap-2 border-t border-border-soft px-3 py-2">
+					{e.detail ? (
+						source ? (
+							<ChatLink
+								href={source}
+								title={`Open ${e.detail}`}
+								className="block whitespace-pre-wrap font-mono text-[11.5px] leading-relaxed text-accent underline underline-offset-2 [overflow-wrap:anywhere]"
+							>
+								{e.detail}
+							</ChatLink>
 						) : (
-							<Mono
-								text={e.output}
-								className={e.error ? 'text-del/80' : 'text-muted'}
-								language={e.error ? null : languageForToolOutput(e.tool, e.detail)}
-							/>
-						)}
-					</div>
-				) : null}
-				{open && images.length ? (
-					<div
-						className={cn('flex min-w-0 flex-col gap-2', (e.detail || e.output) && 'border-t border-border-soft pt-2')}
-					>
-						<Label>{plural(images.length, 'image')}</Label>
-						{images.map(reference => (
-							<ToolImage key={reference} reference={reference} />
-						))}
-					</div>
-				) : null}
-			</div>
+							<Mono text={e.detail} className="text-muted" language={languageForTool(e.tool)} />
+						)
+					) : null}
+					{e.output ? (
+						<div className={cn('min-w-0', e.detail && 'border-t border-border-soft pt-2')}>
+							<Label>{e.error ? 'error' : e.diff ? 'changes' : 'output'}</Label>
+							{e.diff ? (
+								<Patch patch={e.output} fileName={e.detail} />
+							) : (
+								<Mono
+									text={e.output}
+									className={e.error ? 'text-del/80' : 'text-muted'}
+									language={e.error ? null : languageForToolOutput(e.tool, e.detail)}
+								/>
+							)}
+						</div>
+					) : null}
+					{open && images.length ? (
+						<div
+							className={cn(
+								'flex min-w-0 flex-col gap-2',
+								(e.detail || e.output) && 'border-t border-border-soft pt-2'
+							)}
+						>
+							<Label>{plural(images.length, 'image')}</Label>
+							{images.map(reference => (
+								<ToolImage key={reference} reference={reference} />
+							))}
+						</div>
+					) : null}
+				</div>
+			) : null}
 		</details>
 	)
 })
