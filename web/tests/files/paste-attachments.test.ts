@@ -19,7 +19,8 @@ describe('pasted attachments', () => {
 
 		expect(files).toHaveLength(1)
 		expect(files[0].name).toBe('pasted-text.txt')
-		expect(files[0].type).toBe('text/plain')
+		// Bun includes the UTF-8 charset; both forms describe the same plain-text attachment.
+		expect(files[0].type).toMatch(/^text\/plain(?:;charset=utf-8)?$/)
 		expect(await files[0].text()).toBe(text)
 	})
 

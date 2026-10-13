@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Rust, at the version pinned in `rust-toolchain.toml` (rustup installs it on first use).
-- Node 24 or newer.
+- Bun 1.3.12, pinned by `packageManager` in `web/package.json`.
 - macOS 14 or newer for bundling and the manual checks.
 
 ## Relay (`crates/relay`)
@@ -166,12 +166,25 @@ Done together with the user, never by an agent alone:
 
 ## Web app (`web/`)
 
+Use Bun to install dependencies and run scripts. `web/bunfig.toml` forces Node-shebang
+tools and their child processes to use Bun, so Vite, TypeScript, Biome and Vitest run
+without a Node installation. Use `bun run test`, not `bun test`, to invoke the existing
+Vitest suite. TypeScript uses `@types/bun` for the runtime APIs. Its compatibility
+definitions and the toolchain still bring in `@types/node` transitively; those are
+type declarations, not a Node runtime. Imports such as `node:fs` run under Bun.
+
 ```sh
-npm --prefix web ci
-npm --prefix web run build     # output in web/dist
-npm --prefix web test
-npm --prefix web run lint
+bun install --cwd web --frozen-lockfile
+bun run --cwd web dev        # Vite with HMR; /api proxies to the local relay
+bun run --cwd web build      # output in web/dist
+bun run --cwd web test
+bun run --cwd web lint
+bun run --cwd web verify     # typecheck, lint and tests
 ```
+
+`web/bun.lock` is the dependency lockfile. After changing dependencies with `bun add`
+or `bun remove` inside `web/`, commit the updated manifest and lockfile together.
+CI and app bundling use `--frozen-lockfile` to prevent dependency drift.
 
 ## Bundling
 
@@ -179,7 +192,7 @@ npm --prefix web run lint
 
 - No `--adhoc`: signs with the first `Developer ID Application: ...` identity in the keychain (hardened runtime, secure timestamp) and fails if there is none, or if the built `Info.plist` has no `SUPublicEDKey`.
 - `--adhoc`: ad-hoc signature, for local builds without a certificate. Accessibility grants do not survive rebuilds with it.
-- `--skip-web`: skips `npm ci` and the web build. It requires an existing `web/dist`; the script fails if `web/dist/index.html` is missing.
+- `--skip-web`: skips `bun install --frozen-lockfile` and the web build. It requires an existing `web/dist`; the script fails if `web/dist/index.html` is missing.
 - `--out DIR`: where the app is written. Default: `build/` (`build/` is not committed).
 
 `scripts/check-app.sh` runs the tests of the app's package and builds the app target unsigned; CI runs it.

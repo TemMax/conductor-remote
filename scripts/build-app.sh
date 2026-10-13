@@ -54,8 +54,8 @@ else
 fi
 
 if [ "$skip_web" -eq 0 ]; then
-	npm --prefix web ci
-	npm --prefix web run build
+	bun install --cwd web --frozen-lockfile
+	bun run --cwd web build
 fi
 if [ ! -f web/dist/index.html ]; then
 	echo "error: web/dist is not built; run without --skip-web." >&2

@@ -18,7 +18,9 @@ describe('Pierre diff syntax highlighting', () => {
 
 			const html = highlighter.codeToHtml('const answer: number = 42', {
 				lang: 'typescript',
-				theme: 'pierre-dark'
+				theme: 'pierre-dark',
+				// Verify complete tokenization independently of cold grammar compilation speed.
+				tokenizeTimeLimit: 0
 			})
 
 			expect(html).toMatch(/<span style="color:[^"]+">const<\/span>/)
