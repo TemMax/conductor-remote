@@ -27,10 +27,12 @@ Requirements: macOS 14 or later on Apple Silicon, Conductor, and Tailscale for t
 
 ## Development
 
+The web toolchain uses Bun 1.3.12 (pinned in `web/package.json`); Node is not required.
+
     cargo test --workspace
-    npm --prefix web ci
-    npm --prefix web run verify
-    npm --prefix web run build
+    bun install --cwd web --frozen-lockfile
+    bun run --cwd web verify
+    bun run --cwd web build
 
 ## License
 

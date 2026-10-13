@@ -17,7 +17,7 @@
 		"isolatedModules": true,
 		"moduleDetection": "force",
 		"jsx": "react-jsx",
-		"types": ["node", "vite/client"]
+		"types": ["bun", "vite/client"]
 	},
 	"include": ["src", "tests", "vite.config.ts", "vitest.config.ts"]
 }

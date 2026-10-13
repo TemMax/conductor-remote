@@ -148,7 +148,7 @@ CI before merging. Do not replace the SHA with a moving tag.
 ## What the workflow does
 
 1. Checks out the repository, rejects tracked private working files and settles the tag: the tag the run is on, or `v` + the Cargo workspace version on `main`. Every run stops unless its commit is on `origin/main`, before any signing secret is used. A publishing run also requires a tag.
-2. Checks for Xcode 26 and installs Node 24, XcodeGen 2.46.0 and the Rust toolchain of `rust-toolchain.toml`.
+2. Checks for Xcode 26 and installs Bun at the version pinned in `web/package.json`, XcodeGen 2.46.0 and the Rust toolchain of `rust-toolchain.toml`.
 3. Reads the build number of the latest release from its `appcast.xml` (none when there is no release yet, or the latest one has no feed) and runs `scripts/check-release-version.sh`: the tag, the Cargo version and `MARKETING_VERSION` agree, the build number is above the previous one, and the release notes exist.
 4. Downloads the Sparkle tools at a pinned version and checksum, and writes the Sparkle key to a file only the runner can read.
 5. Imports the certificate into a temporary keychain with a random password. Masks the signing identity, owner name and Team ID before building.

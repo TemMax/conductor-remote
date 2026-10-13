@@ -4,7 +4,7 @@
  * Scope is deliberately narrow: byte mode, error-correction level M, versions 1–10 (≈120 bytes max,
  * and the phone URL is ~70). That keeps the version/EC tables small and hand-verifiable while covering
  * every URL this relay can produce. Kept strip-clean like the rest of the repo (no enums/namespaces/
- * param-property constructors) so it runs under plain `node` type-stripping with zero deps.
+ * param-property constructors) so it runs in the browser and under Bun with zero deps.
  *
  * References the ISO/IEC 18004 QR Code spec; placement/format math mirrors Nayuki's reference encoder.
  */
