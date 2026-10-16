@@ -27,9 +27,9 @@ const PUBLIC_REFUSAL: &str =
 const TAILNET_REFUSAL: &str = "outside the files this relay may read";
 
 const SOURCE_EXTENSIONS: &[&str] = &[
-    ".bash", ".c", ".cc", ".cpp", ".css", ".go", ".h", ".hpp", ".html", ".java", ".js", ".json",
-    ".jsx", ".md", ".mjs", ".mts", ".php", ".py", ".rb", ".rs", ".scss", ".sh", ".sql", ".svg",
-    ".swift", ".toml", ".ts", ".tsx", ".txt", ".yaml", ".yml",
+    ".bash", ".c", ".cc", ".cpp", ".css", ".go", ".h", ".hpp", ".htm", ".html", ".java", ".js",
+    ".json", ".jsx", ".md", ".mjs", ".mts", ".php", ".py", ".rb", ".rs", ".scss", ".sh", ".sql",
+    ".svg", ".swift", ".toml", ".ts", ".tsx", ".txt", ".yaml", ".yml",
 ];
 
 const IMAGE_EXTENSIONS: &[&str] = &[".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"];

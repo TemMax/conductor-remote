@@ -588,3 +588,198 @@ fn disabling_removes_only_root_handler_on_a_shared_https_port() {
         [format!("{TAILSCALE} serve --https=443 --set-path=/ off")]
     );
 }
+
+fn preview_receipt(state: &Path) -> conductor_remote::artifacts::ArtifactExposureReceipt {
+    use conductor_remote::artifacts::store::ArtifactStore;
+    let store = ArtifactStore::open(&state.join("artifacts")).unwrap();
+    let mut guard = store.lock().unwrap();
+    let binding = guard
+        .reserve_origin(
+            &"a".repeat(64),
+            "https://mac.example.ts.net:30000",
+            &format!("conductor_preview_{}", "b".repeat(32)),
+            std::time::SystemTime::now(),
+        )
+        .unwrap();
+    let receipt = conductor_remote::artifacts::ArtifactExposureReceipt {
+        binding_id: binding.binding_id,
+        loopback_port: 45000,
+        https_port: 30000,
+        origin: binding.origin,
+        generation: guard.snapshot().unwrap().generation,
+    };
+    guard.begin_publication(receipt.clone(), true).unwrap();
+    guard.mark_active(&receipt).unwrap();
+    receipt
+}
+
+fn preview_runner(fail: bool, replaced: bool) -> FakeRunner {
+    let removed = Rc::new(RefCell::new(false));
+    FakeRunner::new(move |line| {
+        if line.ends_with(" serve --yes --https=30000 --set-path=/ off") {
+            if fail {
+                return Some(failed("private-command-output"));
+            }
+            *removed.borrow_mut() = true;
+            return Some(ok(""));
+        }
+        if line.ends_with(" serve status --json") {
+            let proxy = if replaced {
+                "http://127.0.0.1:9999"
+            } else {
+                "http://127.0.0.1:45000"
+            };
+            let handlers = if *removed.borrow() {
+                serde_json::json!({"/other":{"Proxy":"http://127.0.0.1:9000"}})
+            } else {
+                serde_json::json!({"/":{"Proxy":proxy},"/other":{"Proxy":"http://127.0.0.1:9000"}})
+            };
+            return Some(ok(&serde_json::json!({
+                "TCP":{"30000":{"HTTPS":true},"23000":{"HTTPS":true}},
+                "Web":{
+                    "mac.example.ts.net:30000":{"Handlers":handlers},
+                    "mac.example.ts.net:23000":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3100"}}}
+                }
+            })
+            .to_string()));
+        }
+        if line.ends_with(" status --json") {
+            return Some(ok(TS_STATUS));
+        }
+        None
+    })
+}
+
+#[test]
+fn effective_off_paths_revoke_preview_generation_and_remove_only_owned_root_handler() {
+    use conductor_remote::artifacts::store::ArtifactStore;
+    for action in [
+        TailnetAction::Off,
+        TailnetAction::Disable,
+        TailnetAction::Ensure,
+    ] {
+        let state = tempfile::tempdir().unwrap();
+        if action == TailnetAction::Ensure {
+            conductor_remote::state::settings::set(state.path(), "EXPOSE", "off").unwrap();
+        }
+        let receipt = preview_receipt(state.path());
+        let runner = preview_runner(false, false);
+        let report = configured(action, &runner, state.path());
+        assert_eq!(report.error, None);
+        assert_eq!(
+            runner.changes(),
+            [format!(
+                "{TAILSCALE} serve --yes --https=30000 --set-path=/ off"
+            )]
+        );
+        let snapshot = ArtifactStore::open(&state.path().join("artifacts"))
+            .unwrap()
+            .snapshot()
+            .unwrap();
+        assert!(snapshot.remote_revoked);
+        assert!(snapshot.generation > receipt.generation);
+        assert!(snapshot.receipts.is_empty());
+        assert!(snapshot.bindings[0].tombstoned);
+        // Restart/Ensure with saved-off preference cannot resurrect any preview mapping.
+        if action != TailnetAction::Off {
+            let restarted = preview_runner(false, false);
+            let report = configured(TailnetAction::Ensure, &restarted, state.path());
+            assert_eq!(report.error, None);
+            assert!(restarted.changes().is_empty());
+        }
+    }
+}
+
+#[test]
+fn off_retains_failed_preview_receipts_reports_failure_and_retries_next_process() {
+    use conductor_remote::artifacts::store::ArtifactStore;
+    let state = tempfile::tempdir().unwrap();
+    let receipt = preview_receipt(state.path());
+    let report = configured(
+        TailnetAction::Disable,
+        &preview_runner(true, false),
+        state.path(),
+    );
+    let error = report.error.unwrap();
+    assert!(error.contains("owned preview mappings"));
+    assert!(!error.contains("private-command-output"));
+    let store = ArtifactStore::open(&state.path().join("artifacts")).unwrap();
+    assert!(store.snapshot().unwrap().remote_revoked);
+    assert_eq!(store.snapshot().unwrap().receipts[0].receipt, receipt);
+    let runner = preview_runner(false, false);
+    let report = configured(TailnetAction::Ensure, &runner, state.path());
+    assert_eq!(report.error, None);
+    assert!(store.snapshot().unwrap().receipts.is_empty());
+    assert!(store.snapshot().unwrap().remote_revoked);
+}
+
+#[test]
+fn off_discards_stale_receipt_without_touching_replacement_or_missing_binary() {
+    use conductor_remote::artifacts::store::ArtifactStore;
+    let state = tempfile::tempdir().unwrap();
+    preview_receipt(state.path());
+    let runner = preview_runner(false, true);
+    let report = configured(TailnetAction::Disable, &runner, state.path());
+    assert_eq!(report.error, None);
+    assert!(runner.changes().is_empty());
+    let store = ArtifactStore::open(&state.path().join("artifacts")).unwrap();
+    assert!(store.snapshot().unwrap().receipts.is_empty());
+
+    let state = tempfile::tempdir().unwrap();
+    preview_receipt(state.path());
+    let report = conductor_remote::service::tailnet::run_configured(
+        TailnetAction::Disable,
+        &runner,
+        None,
+        RELAY_PORT,
+        state.path(),
+        &|_| None,
+    );
+    assert!(report.error.unwrap().contains("owned preview mappings"));
+    let snapshot = ArtifactStore::open(&state.path().join("artifacts"))
+        .unwrap()
+        .snapshot()
+        .unwrap();
+    assert!(snapshot.remote_revoked);
+    assert_eq!(snapshot.receipts.len(), 1);
+}
+
+#[test]
+fn explicit_off_stays_revoked_under_environment_tailnet_until_successful_ensure() {
+    use conductor_remote::artifacts::store::ArtifactStore;
+    let state = tempfile::tempdir().unwrap();
+    let runner = tailnet("null", "null");
+    let env = |name: &str| (name == "EXPOSE").then(|| "tailnet".to_owned());
+    let report = conductor_remote::service::tailnet::run_configured(
+        TailnetAction::Off,
+        &runner,
+        Some(Path::new(TAILSCALE)),
+        RELAY_PORT,
+        state.path(),
+        &env,
+    );
+    assert_eq!(report.error, None);
+    assert_eq!(report.enabled, Some(true));
+    let store = ArtifactStore::open(&state.path().join("artifacts")).unwrap();
+    assert!(!store.current_permission(true).unwrap().enabled);
+    let report = conductor_remote::service::tailnet::run_configured(
+        TailnetAction::Ensure,
+        &runner,
+        None,
+        RELAY_PORT,
+        state.path(),
+        &env,
+    );
+    assert!(report.error.is_some());
+    assert!(!store.current_permission(true).unwrap().enabled);
+    let report = conductor_remote::service::tailnet::run_configured(
+        TailnetAction::Ensure,
+        &tailnet("null", SERVE_443),
+        Some(Path::new(TAILSCALE)),
+        RELAY_PORT,
+        state.path(),
+        &env,
+    );
+    assert_eq!(report.error, None);
+    assert!(store.current_permission(true).unwrap().enabled);
+}

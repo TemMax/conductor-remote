@@ -116,6 +116,7 @@ pub trait PrefsService: Send + Sync + 'static {
 /// Services added after the first milestones; every field defaults to `None`.
 #[derive(Clone, Default)]
 pub struct Services {
+    pub artifacts: Option<Arc<dyn crate::artifacts::ArtifactPreviewService>>,
     pub prefs: Option<Arc<dyn PrefsService>>,
     pub host: Option<Arc<dyn crate::host::HostService>>,
     pub dev: Option<Arc<dyn crate::dev::DevServerService>>,

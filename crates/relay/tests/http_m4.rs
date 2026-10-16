@@ -286,6 +286,7 @@ fn state(writes: Option<Arc<FakeWrites>>, prefs: Option<Arc<FakePrefs>>) -> Rout
         writes: writes.map(|writes| writes as Arc<dyn WriteService>),
         notify: None,
         services: Services {
+            artifacts: None,
             prefs: prefs.map(|prefs| prefs as Arc<dyn PrefsService>),
             host: None,
             dev: None,

@@ -8,12 +8,16 @@ import type {
 	AgentPatch,
 	AgentResult,
 	ArchiveResult,
+	ArtifactPreviewSession,
+	ArtifactPreviewSource,
 	AutoModelConfig,
 	AutoModelConfigResponse,
+	CloseArtifactPreviewResult,
 	CloseChatResult,
 	ClosedSessionsResponse,
 	ContextBreakdownResponse,
 	ContinueWorkspaceResult,
+	CreateArtifactPreviewRequest,
 	CreateWorkspaceRequest,
 	CreateWorkspaceResult,
 	DevServerResult,
@@ -213,6 +217,18 @@ export const client = {
 	toolImage: (reference: string): Promise<string> => cachedObjectUrl(routes.toolImage.path(reference)),
 	/** A bounded source preview for an absolute `path:line` link in chat Markdown. */
 	filePreview: (reference: string) => api<FilePreviewResponse>(routes.filePreview.path(reference)),
+	/** Create an isolated preview; its one-use grant is sent only to the exact bootstrap origin. */
+	createArtifactPreview: (request: CreateArtifactPreviewRequest) =>
+		api<ArtifactPreviewSession>(routes.createArtifactPreview.path(), {
+			method: routes.createArtifactPreview.method,
+			body: JSON.stringify(request)
+		}),
+	/** Full original HTML, separate from the bounded file-preview excerpt. */
+	artifactPreviewSource: (id: string) => api<ArtifactPreviewSource>(routes.artifactPreviewSource.path(id)),
+	closeArtifactPreview: (id: string) =>
+		api<CloseArtifactPreviewResult>(routes.closeArtifactPreview.path(id), {
+			method: routes.closeArtifactPreview.method
+		}),
 	/** Keep a file on the relay until the workspace it belongs to exists. */
 	stageAttachment: (file: File) => upload<StageAttachmentResult>(routes.stageAttachment.path(), file),
 	/** Remove an upload cancelled before it became a synced draft attachment. */

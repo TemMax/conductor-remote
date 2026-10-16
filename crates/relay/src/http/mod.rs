@@ -1,5 +1,6 @@
 //! HTTP: the token gate, the API routes and the embedded web app.
 
+mod artifacts;
 mod dev;
 mod files;
 mod host;
@@ -89,6 +90,9 @@ async fn api(state: AppState, request: Request) -> Response {
         }
     }
     let (parts, body) = request.into_parts();
+    if let Some(target) = artifacts::Target::parse(&parts.method, parts.uri.path()) {
+        return artifacts::route(&state, target, body).await;
+    }
     if let Some(response) = reads::route(&state, &parts.method, &parts.uri, &parts.headers).await {
         return response;
     }

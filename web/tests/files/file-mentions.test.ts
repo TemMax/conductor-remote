@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isPreviewableImage, isPreviewableSource } from '../../src/contract/shared.ts'
 import { buildResolver, resolveImageReference } from '../../src/lib/fileMentions.ts'
 
 /**
@@ -94,5 +95,24 @@ describe('an explicit Markdown image reference', () => {
 		expect(resolveImageReference('../other/result.png', WORKTREE)).toBeNull()
 		expect(resolveImageReference('./result.svg', WORKTREE)).toBeNull()
 		expect(resolveImageReference('./result.png', null)).toBe('result.png')
+	})
+})
+
+describe('HTML source discovery and mentions', () => {
+	it('accepts both HTML extensions as source, including uppercase, without treating them as images', () => {
+		for (const path of ['preview.html', 'preview.htm', 'preview.HTM']) {
+			expect(isPreviewableSource(path)).toBe(true)
+			expect(isPreviewableImage(path)).toBe(false)
+		}
+	})
+
+	it('resolves discovered .htm files and keeps line suffixes and ambiguity protections', () => {
+		const html = buildResolver(WORKTREE, ['.context/artifacts/page.htm', 'public/page.htm', 'preview.HTM'])
+		expect(html('.context/artifacts/page.htm')).toBe(`${WORKTREE}/.context/artifacts/page.htm`)
+		expect(html('public/page.htm:12:3')).toBe(`${WORKTREE}/public/page.htm:12:3`)
+		expect(html('preview.HTM')).toBe(`${WORKTREE}/preview.HTM`)
+		expect(html('page.htm')).toBeNull()
+		expect(html('../outside/page.htm')).toBeNull()
+		expect(html('/tmp/example.htm')).toBe('/tmp/example.htm')
 	})
 })

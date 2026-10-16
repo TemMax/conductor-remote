@@ -66,6 +66,7 @@ const EXTENSION_LANGUAGES: Record<string, string> = {
 	mts: 'typescript',
 	cts: 'typescript',
 	html: 'xml',
+	htm: 'xml',
 	svg: 'xml',
 	xml: 'xml',
 	yaml: 'yaml',

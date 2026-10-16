@@ -5,6 +5,8 @@
 
 use std::path::Path;
 
+use crate::artifacts::exposure::cleanup_owned;
+use crate::artifacts::store::{ArtifactStore, LifecycleGuard};
 use crate::state::settings::{self, Expose, Source};
 
 use super::ServeStatus;
@@ -77,6 +79,47 @@ pub fn run_configured(
     state_dir: &Path,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> TailnetReport {
+    // Serialize preference changes, publication and revocation across the relay and this CLI.
+    // Status remains read-only and never initializes artifact metadata.
+    if action == TailnetAction::Status {
+        return run_configured_locked(action, runner, tailscale, relay_port, state_dir, env, None);
+    }
+    let store = match ArtifactStore::open(&state_dir.join("artifacts")) {
+        Ok(store) => store,
+        Err(_) => {
+            let mut report = TailnetReport::empty();
+            report.fail("preview lifecycle state could not be opened");
+            return report;
+        }
+    };
+    let mut guard = match store.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            let mut report = TailnetReport::empty();
+            report.fail("preview lifecycle lock could not be acquired");
+            return report;
+        }
+    };
+    run_configured_locked(
+        action,
+        runner,
+        tailscale,
+        relay_port,
+        state_dir,
+        env,
+        Some(&mut guard),
+    )
+}
+
+fn run_configured_locked(
+    action: TailnetAction,
+    runner: &dyn CommandRunner,
+    tailscale: Option<&Path>,
+    relay_port: u16,
+    state_dir: &Path,
+    env: &dyn Fn(&str) -> Option<String>,
+    mut guard: Option<&mut LifecycleGuard>,
+) -> TailnetReport {
     let (mut resolved, mut rows) = match settings::resolve(state_dir, env) {
         Ok(value) => value,
         Err(_) => {
@@ -123,7 +166,33 @@ pub fn run_configured(
             action => action,
         }
     };
+    let mut cleanup_error = None;
+    if effective == TailnetAction::Off {
+        if let Some(guard) = guard.as_deref_mut() {
+            // Durable revocation precedes commands, even if EXPOSE remains tailnet or a command
+            // fails. A saved-off Ensure follows exactly this path and cannot re-enable previews.
+            if guard.revoke_remote().is_err() {
+                let mut report = TailnetReport::empty();
+                report.fail("remote previews could not be revoked");
+                return report;
+            }
+            if cleanup_owned(guard, runner, tailscale).is_err() {
+                cleanup_error =
+                    Some("owned preview mappings could not all be removed; cleanup will retry");
+            }
+        }
+    }
     let mut report = run(effective, runner, tailscale, relay_port);
+    if effective == TailnetAction::Ensure && enabled && report.error.is_none() && report.mapped {
+        if let Some(guard) = guard {
+            if guard.allow_remote().is_err() {
+                report.fail("remote preview permission could not be enabled");
+            }
+        }
+    }
+    if let Some(error) = cleanup_error {
+        report.fail(error);
+    }
     report.enabled = Some(enabled);
     report.expose_source = source(&rows).map(|source| {
         match source {

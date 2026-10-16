@@ -7,6 +7,13 @@ Claude and Codex interactive questions appear as cards in the chat. Choose optio
 your own answers, then submit the whole set together. Answering in Conductor or Remote closes
 the card and preserves it in the transcript.
 
+Open saved `.html`/`.htm` files from chat or Review's All-files view as interactive
+previews, with neighboring CSS, images, fonts, modules and JSON. HTML code fences
+have a Preview button. The shared viewer includes full original Code, Refresh and
+diagnostics; explicit line links start in Code. Previews use an isolated browser
+origin and ordinary browser rules for CDN resources and external APIs. Projects
+that need a build or backend still use Run. See [preview behavior and limits](docs/development.md#html-artifact-previews).
+
 Two parts:
 
 - **The relay** (`crates/relay`, Rust) runs on the Mac next to Conductor. It reads Conductor's

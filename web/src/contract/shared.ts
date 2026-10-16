@@ -413,6 +413,7 @@ const SOURCE_EXTENSIONS = new Set([
 	'.go',
 	'.h',
 	'.hpp',
+	'.htm',
 	'.html',
 	'.java',
 	'.js',
@@ -451,6 +452,11 @@ function fileExtension(filePath: string): string | null {
 export function isPreviewableSource(filePath: string): boolean {
 	const extension = fileExtension(filePath)
 	return extension !== null && SOURCE_EXTENSIONS.has(extension)
+}
+
+/** Only HTML documents can execute in the isolated artifact viewer. */
+export function isHtmlArtifact(reference: string): boolean {
+	return /\.html?(?::[1-9]\d*(?::\d+)?)?$/i.test(reference)
 }
 
 /** True for a raster image the relay may return to an authenticated browser. */
