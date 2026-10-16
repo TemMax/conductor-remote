@@ -1,10 +1,12 @@
 import { ChevronLeft, ChevronRight, List } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { isHtmlArtifact } from '../../contract/shared.ts'
 import { useFilePreview } from '../../hooks/review.ts'
 import { cn } from '../../lib/cn.ts'
 import type { DiffFileScope, DiffFileTreeNode } from '../../lib/diff.ts'
 import { buildDiffFileTree, filesForScope, filesInFlatOrder, filesInTreeOrder, patchForFile } from '../../lib/diff.ts'
 import type { DiffFile, Workspace, WorkspaceDiff, WorkspaceFileDiff, WorkspaceFilesResponse } from '../../lib/types.ts'
+import { ArtifactViewer } from '../artifacts/ArtifactViewer.tsx'
 import { FileIcon, FolderIcon } from '../FileIcon.tsx'
 import { Empty, Spinner } from '../ui.tsx'
 import { MergeBanner } from '../workspaces/MergeBanner.tsx'
@@ -308,9 +310,54 @@ export function DiffFileViewer({
 	const previous = fileIndex > 0 ? files[fileIndex - 1] : undefined
 	const next = fileIndex >= 0 && fileIndex < files.length - 1 ? files[fileIndex + 1] : undefined
 	const sourceReference = scope === 'all' && workspace.worktree ? `${workspace.worktree}/${filePath}` : null
-	const sourceQuery = useFilePreview(sourceReference, scope === 'all')
+	const htmlArtifact = !!sourceReference && isHtmlArtifact(sourceReference)
+	const sourceQuery = useFilePreview(sourceReference, scope === 'all' && !htmlArtifact)
 	const fileLabel = scope === 'changed' ? 'changed file' : 'file'
 	const filesLabel = scope === 'changed' ? 'changed files' : 'all files'
+
+	const navigation = (
+		<div className="flex shrink-0 items-center gap-0.5 lg:hidden">
+			<button
+				type="button"
+				onClick={() => previous && onSelectFile(previous.path)}
+				disabled={!previous}
+				aria-label={`Previous ${fileLabel}`}
+				className="flex size-8 items-center justify-center rounded-full text-muted transition active:bg-surface-2 disabled:opacity-25"
+			>
+				<ChevronLeft size={17} />
+			</button>
+			<span className="min-w-9 text-center text-[11px] tabular-nums text-faint">
+				{fileIndex >= 0 ? `${fileIndex + 1}/${files.length}` : '—'}
+			</span>
+			<button
+				type="button"
+				onClick={() => next && onSelectFile(next.path)}
+				disabled={!next}
+				aria-label={`Next ${fileLabel}`}
+				className="flex size-8 items-center justify-center rounded-full text-muted transition active:bg-surface-2 disabled:opacity-25"
+			>
+				<ChevronRight size={17} />
+			</button>
+			<button
+				type="button"
+				onClick={onShowFiles}
+				aria-label={`Show ${filesLabel}`}
+				className="flex size-8 items-center justify-center rounded-full text-muted transition active:bg-surface-2"
+			>
+				<List size={17} />
+			</button>
+		</div>
+	)
+	if (htmlArtifact && sourceReference) {
+		return (
+			<ArtifactViewer
+				key={sourceReference}
+				target={{ kind: 'file', reference: sourceReference }}
+				onClose={onClose}
+				actions={navigation}
+			/>
+		)
+	}
 
 	return (
 		<section
@@ -338,39 +385,7 @@ export function DiffFileViewer({
 						(file?.path ?? filePath)
 					)
 				}
-				actions={
-					<div className="flex shrink-0 items-center gap-0.5 lg:hidden">
-						<button
-							type="button"
-							onClick={() => previous && onSelectFile(previous.path)}
-							disabled={!previous}
-							aria-label={`Previous ${fileLabel}`}
-							className="flex size-8 items-center justify-center rounded-full text-muted transition active:bg-surface-2 disabled:opacity-25"
-						>
-							<ChevronLeft size={17} />
-						</button>
-						<span className="min-w-9 text-center text-[11px] tabular-nums text-faint">
-							{fileIndex >= 0 ? `${fileIndex + 1}/${files.length}` : '—'}
-						</span>
-						<button
-							type="button"
-							onClick={() => next && onSelectFile(next.path)}
-							disabled={!next}
-							aria-label={`Next ${fileLabel}`}
-							className="flex size-8 items-center justify-center rounded-full text-muted transition active:bg-surface-2 disabled:opacity-25"
-						>
-							<ChevronRight size={17} />
-						</button>
-						<button
-							type="button"
-							onClick={onShowFiles}
-							aria-label={`Show ${filesLabel}`}
-							className="flex size-8 items-center justify-center rounded-full text-muted transition active:bg-surface-2"
-						>
-							<List size={17} />
-						</button>
-					</div>
-				}
+				actions={navigation}
 				onClose={onClose}
 				closeLabel="Close file viewer"
 			/>

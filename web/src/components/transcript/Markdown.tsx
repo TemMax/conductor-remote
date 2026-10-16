@@ -1,18 +1,23 @@
 import type { Element, ElementContent } from 'hast'
 import { Paperclip } from 'lucide-react'
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown, { type ExtraProps } from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import { attachmentTokens, isPreviewableSource } from '../../contract/shared.ts'
 import { useLocalImage } from '../../hooks/images.ts'
-import { client } from '../../lib/api.ts'
-import { useAttachmentReference, useFileMention, useImageReference } from '../../lib/fileMentions.ts'
+import {
+	useArtifactBaseDirectory,
+	useAttachmentReference,
+	useFileMention,
+	useHtmlReference,
+	useImageReference
+} from '../../lib/fileMentions.ts'
 import { languageForFence } from '../../lib/syntax/highlight.ts'
-import type { FilePreviewResponse } from '../../lib/types.ts'
+import { ArtifactSheet } from '../artifacts/ArtifactViewer.tsx'
+import { FilePreviewSheet } from '../artifacts/FilePreviewSheet.tsx'
 import { ImageThumbnail } from '../attachments/ImageThumbnail.tsx'
-import { PreviewTruncationNotice, SourceLines } from '../review/SourceLines.tsx'
 import { ViewerHeader } from '../review/ViewerHeader.tsx'
 import { CopyButton, Spinner } from '../ui.tsx'
 import { Code } from './Code.tsx'
@@ -101,14 +106,18 @@ export function ChatLink({ href, children, onClick, ...props }: React.ComponentP
 	// resolves the same way an inline mention does, and for the same reason: followed as a
 	// URL it lands on the PWA's own router and shows the home screen.
 	const mention = useFileMention(href ?? null)
-	const source = attachmentPreview?.kind === 'source' ? attachmentPreview.reference : (sourceReference(href) ?? mention)
+	const htmlReference = useHtmlReference(href ?? null)
+	const source =
+		attachmentPreview?.kind === 'source'
+			? attachmentPreview.reference
+			: (htmlReference ?? sourceReference(href) ?? mention)
 	const reference = imageReference ?? source
 	const [previewing, setPreviewing] = useState(false)
 	const preview =
 		imageReference && previewing ? (
 			<ImagePreviewSheet reference={imageReference} onClose={() => setPreviewing(false)} />
 		) : source && previewing ? (
-			<FilePreviewSheet reference={source} onClose={() => setPreviewing(false)} />
+			<FilePreviewSheet renderMarkdown={renderMarkdownFile} reference={source} onClose={() => setPreviewing(false)} />
 		) : null
 	// react-markdown's sanitiser blanks the href of every scheme outside http(s), irc(s),
 	// mailto and xmpp, and an empty href follows to the page you are already on — a tap
@@ -153,7 +162,7 @@ export function ChatLink({ href, children, onClick, ...props }: React.ComponentP
 			<a
 				href={href}
 				{...props}
-				title={imageReference ? `Open image ${imageReference}` : props.title}
+				title={imageReference ? `Open image ${imageReference}` : source ? `Open ${source}` : props.title}
 				onClick={event => {
 					onClick?.(event)
 					if (
@@ -211,86 +220,6 @@ function ImagePreviewSheet({ reference, onClose }: { reference: string; onClose:
 	)
 }
 
-function FilePreviewSheet({ reference, onClose }: { reference: string; onClose: () => void }) {
-	const [preview, setPreview] = useState<FilePreviewResponse | null>(null)
-	const [error, setError] = useState<string | null>(null)
-	const highlightedLine = useRef<HTMLDivElement>(null)
-
-	useEffect(() => {
-		let disposed = false
-		setPreview(null)
-		setError(null)
-		void client.filePreview(reference).then(
-			result => {
-				if (!disposed) setPreview(result)
-			},
-			err => {
-				if (!disposed) setError(err instanceof Error ? err.message : 'Could not read source file')
-			}
-		)
-		return () => {
-			disposed = true
-		}
-	}, [reference])
-
-	useEffect(() => {
-		if (!preview?.line) return
-		highlightedLine.current?.scrollIntoView({ block: 'center' })
-	}, [preview?.line])
-
-	useEffect(() => {
-		const closeOnEscape = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') onClose()
-		}
-		window.addEventListener('keydown', closeOnEscape)
-		return () => window.removeEventListener('keydown', closeOnEscape)
-	}, [onClose])
-
-	return createPortal(
-		<>
-			<div className="fixed inset-0 z-[60] bg-black/60" onClick={onClose} aria-hidden />
-			<div
-				role="dialog"
-				aria-modal="true"
-				aria-label="Source file"
-				className="fade-in pt-safe pb-safe fixed inset-0 z-[60] mx-auto flex flex-col bg-bg md:inset-6 md:rounded-3xl md:border md:border-border-soft"
-			>
-				<ViewerHeader
-					title="Source"
-					subtitle={preview?.path ?? reference}
-					onClose={onClose}
-					closeLabel="Close source preview"
-				/>
-				<div className="min-h-0 flex-1 overflow-auto">
-					{!preview && !error ? <Spinner label="Reading source…" /> : null}
-					{error ? <p className="mx-auto max-w-xs px-6 py-16 text-center text-sm text-muted">{error}</p> : null}
-					{preview ? (
-						isMarkdownFile(preview.path) ? (
-							<MarkdownFile preview={preview} />
-						) : (
-							<SourceLines preview={preview} lineRef={highlightedLine} />
-						)
-					) : null}
-				</div>
-			</div>
-		</>,
-		document.body
-	)
-}
-
-function isMarkdownFile(filePath: string): boolean {
-	return filePath.toLowerCase().endsWith('.md')
-}
-
-function MarkdownFile({ preview }: { preview: FilePreviewResponse }) {
-	return (
-		<div className="p-4 text-sm leading-6 text-text">
-			<Markdown>{preview.content}</Markdown>
-			<PreviewTruncationNotice preview={preview} />
-		</div>
-	)
-}
-
 /**
  * A fenced block, coloured when its info string names a language we registered.
  * Inline code reaches this component too and carries no class at all, so it falls
@@ -342,7 +271,13 @@ function FileMention({
 					{children}
 				</code>
 			</button>
-			{previewing ? <FilePreviewSheet reference={reference} onClose={() => setPreviewing(false)} /> : null}
+			{previewing ? (
+				<FilePreviewSheet
+					renderMarkdown={renderMarkdownFile}
+					reference={reference}
+					onClose={() => setPreviewing(false)}
+				/>
+			) : null}
 		</>
 	)
 }
@@ -356,9 +291,32 @@ function fenceText(children: React.ReactNode): string | null {
 
 function ChatPre({ node, children, ...props }: React.ComponentProps<'pre'> & ExtraProps) {
 	const source = node ? fenceSource(node) : ''
+	const baseDirectory = useArtifactBaseDirectory()
+	const [previewing, setPreviewing] = useState(false)
+	const html =
+		node?.children.some(
+			child =>
+				child.type === 'element' &&
+				child.tagName === 'code' &&
+				Array.isArray(child.properties.className) &&
+				child.properties.className.some(value => /^(?:language-html|language-htm)$/.test(String(value)))
+		) ?? false
 	return (
 		<div className="relative">
 			<pre {...props}>{children}</pre>
+			{html ? (
+				<button
+					type="button"
+					aria-label="Preview HTML"
+					onClick={() => setPreviewing(true)}
+					className="absolute right-9 top-1.5 rounded-md border border-border-soft bg-bg/90 px-2 py-1 text-xs text-muted"
+				>
+					Preview
+				</button>
+			) : null}
+			{previewing ? (
+				<ArtifactSheet target={{ kind: 'html', html: source, baseDirectory }} onClose={() => setPreviewing(false)} />
+			) : null}
 			{source ? (
 				<CopyButton
 					text={source}
@@ -412,3 +370,7 @@ export const Markdown = memo(function Markdown({
 		</div>
 	)
 })
+
+function renderMarkdownFile(content: string) {
+	return <Markdown>{content}</Markdown>
+}

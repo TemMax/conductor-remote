@@ -454,6 +454,11 @@ export function isPreviewableSource(filePath: string): boolean {
 	return extension !== null && SOURCE_EXTENSIONS.has(extension)
 }
 
+/** Only HTML documents can execute in the isolated artifact viewer. */
+export function isHtmlArtifact(reference: string): boolean {
+	return /\.html?(?::[1-9]\d*(?::\d+)?)?$/i.test(reference)
+}
+
 /** True for a raster image the relay may return to an authenticated browser. */
 export function isPreviewableImage(filePath: string): boolean {
 	const extension = fileExtension(filePath)

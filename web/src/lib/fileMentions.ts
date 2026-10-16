@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import { isPreviewableImage, isPreviewableSource } from '../contract/shared.ts'
+import { isHtmlArtifact, isPreviewableImage, isPreviewableSource } from '../contract/shared.ts'
 
 /**
  * Turn a file an agent named in prose into a source link.
@@ -186,4 +186,35 @@ export function useImageReference(href: string | null): string | null {
 /** Resolve a parsed attachment token in the workspace currently on screen. */
 export function useAttachmentReference(filePath: string | null): AttachmentPreviewReference | null {
 	return resolveAttachmentReference(filePath, useContext(FileReferences)?.worktree ?? null)
+}
+
+/** Current workspace root for inline HTML dependencies; no file-list lookup is needed. */
+export function useArtifactBaseDirectory(): string | null {
+	return useContext(FileReferences)?.worktree ?? null
+}
+
+/** Explicit HTML destinations may name ignored artifacts; prose mentions still require a unique file. */
+export function resolveHtmlReference(href: string | null, worktree: string | null): string | null {
+	if (!href || href.length > MAX_EXPLICIT_REFERENCE_CHARS) return null
+	let decoded: string
+	try {
+		decoded = decodeURIComponent(href)
+	} catch {
+		return null
+	}
+	if (
+		!isHtmlArtifact(decoded) ||
+		/[\\?#]/.test(decoded) ||
+		Array.from(decoded).some(character => character.charCodeAt(0) < 32)
+	)
+		return null
+	if (/^[a-z][a-z\d+.-]*:/i.test(decoded) || decoded.startsWith('//')) return null
+	if (decoded.split('/').includes('..')) return null
+	if (decoded.startsWith('/') || decoded.startsWith('~/')) return decoded
+	const relative = decoded.replace(/^(?:\.\/)+/, '')
+	return worktree ? `${worktree}/${relative}` : null
+}
+
+export function useHtmlReference(href: string | null): string | null {
+	return resolveHtmlReference(href, useArtifactBaseDirectory())
 }
