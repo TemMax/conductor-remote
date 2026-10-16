@@ -438,6 +438,7 @@ fn start(exit_with_parent: bool, parent_pid: Option<u32>) -> ExitCode {
         ui: Some(ui),
     });
     let services = Services {
+        artifacts: None,
         prefs: Some(Arc::new(Prefs::new(store.clone()))),
         host: Some(Arc::new(host)),
         dev: Some(dev.clone()),

@@ -365,6 +365,7 @@ impl Rig {
             writes: Some(writes.clone()),
             notify: None,
             services: Services {
+                artifacts: None,
                 prefs: Some(Arc::new(Prefs::new(store))),
                 host: None,
                 dev: None,

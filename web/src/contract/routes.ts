@@ -81,6 +81,9 @@ export const routes = {
 	localImage: param('GET', '/api/local-images/:path'),
 	/** A source-file preview linked from agent Markdown. */
 	filePreview: param('GET', '/api/files/:reference'),
+	createArtifactPreview: flat('POST', '/api/artifact-previews'),
+	artifactPreviewSource: param('GET', '/api/artifact-previews/:id/source'),
+	closeArtifactPreview: param('DELETE', '/api/artifact-previews/:id'),
 	/**
 	 * One image a tool returned, addressed `<message rowid>.<image number in that row>`.
 	 * It is a route rather than a field because the bytes are ~100 kB of base64 each and a

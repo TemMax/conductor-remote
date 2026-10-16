@@ -83,6 +83,69 @@ fn numbered(lines: usize) -> String {
         .join("\n")
 }
 
+#[test]
+fn htm_is_discovered_and_keeps_existing_source_preview_bounds() {
+    use conductor_remote::reads::extras::commands::SystemCommands;
+    use conductor_remote::reads::review::diff::list_source_files;
+
+    let f = Fixture::new();
+    let repo = f.ws.join("repo");
+    write(&repo.join(".gitignore"), ".context/\nignored/\n");
+    write(&repo.join("page.htm"), numbered(700));
+    write(&repo.join("upper.HTM"), "uppercase");
+    write(&repo.join("page.html"), "html");
+    write(&repo.join(".context/artifacts/nested.htm"), "artifact");
+    write(&repo.join("ignored/hidden.htm"), "ignored");
+    let init = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+    let listed = list_source_files(&SystemCommands, repo.to_str().unwrap());
+    assert_eq!(
+        listed.files,
+        [
+            ".context/artifacts/nested.htm",
+            "page.htm",
+            "page.html",
+            "upper.HTM"
+        ]
+    );
+    assert!(!listed.truncated);
+    for mode in [PUBLIC, TAILNET] {
+        let preview = f.preview_path(&repo.join("page.htm"), mode).unwrap();
+        assert_eq!(preview.total_lines, 700);
+        assert_eq!(preview.line_end, 500);
+        assert!(preview.truncated);
+        let preview = f
+            .preview(&format!("{}/page.htm:601:3", repo.display()), mode)
+            .unwrap();
+        assert_eq!(preview.line, Some(601));
+        assert!(preview.content.contains("line 601"));
+        assert_eq!(
+            f.preview_path(&repo.join(".context/artifacts/nested.htm"), mode)
+                .unwrap()
+                .content,
+            "artifact"
+        );
+    }
+    write(&f.outside.join("page.htm"), "outside");
+    assert_eq!(
+        f.preview_path(&f.outside.join("page.htm"), PUBLIC),
+        Err(PreviewError::Forbidden(PUBLIC_REFUSAL))
+    );
+    assert_eq!(
+        f.preview_path(&f.outside.join("page.htm"), TAILNET),
+        Err(PreviewError::Forbidden(TAILNET_REFUSAL))
+    );
+    write(&repo.join("large.htm"), vec![b'a'; 512 * 1024 + 1]);
+    assert_eq!(
+        f.preview_path(&repo.join("large.htm"), PUBLIC),
+        Err(PreviewError::TooLarge)
+    );
+}
+
 // ------------------------------------------------------------------ expose mode
 
 #[test]
@@ -108,6 +171,9 @@ fn source_and_image_extensions() {
         "/a/b.ts",
         "/a/b.TSX",
         "/a/b.md",
+        "/a/b.html",
+        "/a/b.htm",
+        "/a/b.HTM",
         "/a/b.svg",
         "/a/b.tar.gz.py",
         "/a/.md",

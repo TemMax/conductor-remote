@@ -172,6 +172,56 @@ export interface FilePreviewResponse {
 	truncated: boolean
 }
 
+/** POST /api/artifact-previews — parentOrigin is an exact permitted main-app origin. */
+export type CreateArtifactPreviewRequest =
+	| { kind: 'file'; reference: string; parentOrigin: string }
+	| { kind: 'html'; html: string; baseDirectory?: string | null; parentOrigin: string }
+
+export interface ArtifactPreviewSession {
+	id: string
+	origin: string
+	bootstrapUrl: string
+	entryPath: string
+	grant: string
+	/** RFC 3339 timestamp. */
+	expiresAt: string
+	path: string | null
+}
+
+/** GET /api/artifact-previews/:id/source — complete, untouched HTML. */
+export interface ArtifactPreviewSource {
+	path: string | null
+	content: string
+}
+
+export interface CloseArtifactPreviewResult {
+	ok: true
+}
+
+export type ArtifactDiagnosticKind = 'javascript' | 'promise' | 'resource' | 'http'
+
+/** Untrusted display data. Consumers bound the count and lengths before rendering. */
+export interface ArtifactPreviewDiagnostic {
+	kind: ArtifactDiagnosticKind
+	message: string
+	source?: string
+	line?: number
+	column?: number
+}
+
+/** Exact origin, source window and sessionId must all match before processing a message. */
+export type ArtifactPreviewMessage = {
+	channel: 'conductor-artifact-preview'
+	version: 1
+	sessionId: string
+} & (
+	| { type: 'ready' }
+	/** Only the parent sends authorize, with an exact targetOrigin. */
+	| { type: 'authorize'; grant: string }
+	| { type: 'loaded' }
+	| ({ type: 'diagnostic' } & ArtifactPreviewDiagnostic)
+)
+
 /**
  * GET /api/workspaces/:id/files — previewable, worktree-relative source paths.
  *

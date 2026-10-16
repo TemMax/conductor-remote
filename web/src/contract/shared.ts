@@ -413,6 +413,7 @@ const SOURCE_EXTENSIONS = new Set([
 	'.go',
 	'.h',
 	'.hpp',
+	'.htm',
 	'.html',
 	'.java',
 	'.js',

@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod app;
+pub mod artifacts;
 pub mod contract;
 pub mod db;
 pub mod delivery;
