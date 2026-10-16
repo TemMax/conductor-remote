@@ -245,6 +245,49 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn utf8_fragments_without_encoding_metadata_keep_their_text() {
+    let f = Fixture::new(false).await;
+    let original = "<p>Привет, café — 世界</p>";
+    for saved in [false, true] {
+        let session = if saved {
+            f.write("index.html", original);
+            f.file().await
+        } else {
+            f.inline(original).await
+        };
+        let cookie = f.cookie(&session).await;
+        let response = f.get(&session, &session.entry_path, &cookie).await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers()["content-type"],
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            response.text().await.unwrap().replace(
+                "<script src=\"/__conductor_preview/diagnostics.js\"></script>",
+                ""
+            ),
+            original
+        );
+        let head = f
+            .client
+            .head(format!("{}{}", session.origin, session.entry_path))
+            .header("Cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(head.status(), 200);
+        assert_eq!(head.headers()["content-type"], "text/html; charset=utf-8");
+        assert!(head.bytes().await.unwrap().is_empty());
+        assert_eq!(
+            f.manager.source(session.id.clone()).await.unwrap().content,
+            original
+        );
+        f.manager.close(session.id).await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn inline_full_source_bootstrap_and_cookie_authorization() {
     let f = Fixture::new(false).await;
     let html = format!("\u{feff}<!DOCTYPE html>\r\n<html><head><meta charset=utf-8></head><body>{}<button onclick='this.textContent=1'>last</button></body></html>", "line\n".repeat(701));
@@ -278,7 +321,10 @@ async fn inline_full_source_bootstrap_and_cookie_authorization() {
     let cookie = f.cookie(&session).await;
     let response = f.get(&session, &session.entry_path, &cookie).await;
     assert_eq!(response.status(), 200);
-    assert_eq!(response.headers()["content-type"], "text/html");
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/html; charset=utf-8"
+    );
     assert_eq!(response.headers()["cache-control"], "no-store");
     assert_eq!(
         response.headers()["cross-origin-resource-policy"],

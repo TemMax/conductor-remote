@@ -115,7 +115,7 @@ async fn production_controls_bootstrap_full_document_dependencies_and_lease_life
 
     let page = f.resource(&session, &session.entry_path, &cookie).await;
     assert_eq!(page.status(), 200);
-    assert_eq!(page.headers()["content-type"], "text/html");
+    assert_eq!(page.headers()["content-type"], "text/html; charset=utf-8");
     assert_eq!(page.headers()["cache-control"], "no-store");
     assert_eq!(page.headers()["permissions-policy"], "document-domain=()");
     let policy = page.headers()["content-security-policy"].to_str().unwrap();

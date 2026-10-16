@@ -298,7 +298,7 @@ async fn dispatch(
     if path == document.entry_path {
         let source = original_source(&document).await?;
         let html = instrument(&source.content);
-        let mut response = body("text/html", html);
+        let mut response = body("text/html; charset=utf-8", html);
         response
             .headers_mut()
             .insert("accept-ranges", HeaderValue::from_static("none"));
