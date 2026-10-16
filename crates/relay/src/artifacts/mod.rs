@@ -1,10 +1,11 @@
-//! Contracts for isolated HTML previews. No listener or exposure is started by this module.
-//!
-//! The runtime will provide `ArtifactPreviews::new(config: ArtifactPreviewConfig)
-//! -> Result<Self, ArtifactError>` and implement both service and lifecycle traits below.
+//! Contracts and capability-scoped runtime for isolated HTML previews.
 
+mod controller;
 pub mod files;
+mod server;
 pub mod store;
+
+pub use controller::ArtifactPreviews;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
