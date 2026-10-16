@@ -5,10 +5,14 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use conductor_remote::artifacts::exposure::{parent_origins, TailscaleArtifactExposure};
+use conductor_remote::artifacts::{
+    ArtifactClock, ArtifactEntropy, ArtifactError, ArtifactPreviewConfig, ArtifactPreviews,
+};
 use conductor_remote::contract::{AppState, Config, Services, APP_BUNDLE_ID, CONDUCTOR_BUNDLE_ID};
 use conductor_remote::db::ConductorDb;
 use conductor_remote::delivery::parked::{Deliverer, Notice, ParkedQueue, ParkedTimings};
@@ -296,6 +300,21 @@ fn start(exit_with_parent: bool, parent_pid: Option<u32>) -> ExitCode {
     // without `gh` or `git` simply shows no pull-request state or change statistics.
     let extras = Extras::new(std::sync::Arc::new(SystemCommands), home.clone());
     let preview_roots = PreviewRoots::system(&paths.workspaces_root, &home);
+    // Match the existing source-read policy. Broad home/workspace roots themselves cannot be
+    // selected as artifact directories; the scoped file policy enforces that narrower boundary.
+    let artifact_source_roots = [
+        home.clone(),
+        paths.workspaces_root.clone(),
+        Path::new("/Applications/Conductor.app/Contents/Resources/conductor-skill/skills")
+            .to_owned(),
+    ]
+    .into_iter()
+    .filter(|path| path.is_dir())
+    .collect();
+    let artifact_broad_roots = [home.clone(), paths.workspaces_root.clone()]
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .collect();
     // Public exposure is not supported: EXPOSE controls the Tailscale mapping, never the bind address.
     let expose = ExposeMode::Tailnet;
     // The plan allowances come from the CLIs Conductor bundles, else from the `PATH`; the tool
@@ -407,6 +426,14 @@ fn start(exit_with_parent: bool, parent_pid: Option<u32>) -> ExitCode {
         state_dir: config.state_dir.clone(),
         tailscale: find_tailscale(|path| path.exists()),
     });
+    let artifacts = match production_artifacts(&config, artifact_source_roots, artifact_broad_roots)
+    {
+        Ok(artifacts) => Arc::new(artifacts),
+        Err(error) => {
+            tracing::error!("artifact previews could not start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     // launchd names the job in the environment of what it starts.
     let launchd = std::env::var("XPC_SERVICE_NAME").is_ok_and(|name| name == APP_BUNDLE_ID);
     let host = Host::new(HostParts {
@@ -438,7 +465,7 @@ fn start(exit_with_parent: bool, parent_pid: Option<u32>) -> ExitCode {
         ui: Some(ui),
     });
     let services = Services {
-        artifacts: None,
+        artifacts: Some(artifacts.clone()),
         prefs: Some(Arc::new(Prefs::new(store.clone()))),
         host: Some(Arc::new(host)),
         dev: Some(dev.clone()),
@@ -462,7 +489,7 @@ fn start(exit_with_parent: bool, parent_pid: Option<u32>) -> ExitCode {
             writes,
             parked,
             notifier,
-            dev,
+            (dev, artifacts),
             parent_gone,
         );
         let code = match served {
@@ -483,6 +510,74 @@ fn start(exit_with_parent: bool, parent_pid: Option<u32>) -> ExitCode {
     });
 
     lifecycle::run_main_loop()
+}
+
+struct PreviewClock(Instant);
+impl ArtifactClock for PreviewClock {
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+    fn monotonic(&self) -> Duration {
+        self.0.elapsed()
+    }
+}
+struct PreviewEntropy;
+impl ArtifactEntropy for PreviewEntropy {
+    fn fill(&self, bytes: &mut [u8]) -> Result<(), ArtifactError> {
+        getrandom::fill(bytes)
+            .map_err(|_| ArtifactError::Unavailable("artifact randomness is unavailable".into()))
+    }
+}
+
+fn production_artifacts(
+    config: &Config,
+    source_roots: Vec<std::path::PathBuf>,
+    broad_roots: Vec<std::path::PathBuf>,
+) -> Result<ArtifactPreviews, ArtifactError> {
+    let tailscale = find_tailscale(|path| path.exists());
+    // Observe the actual main mapping; do not assume port 443 or trust Host/forwarded headers.
+    let main = tailnet::run(
+        TailnetAction::Status,
+        &SystemRunner,
+        tailscale.as_deref(),
+        config.port,
+    );
+    let remote = main.url.as_deref().map(|url| url.trim_end_matches('/'));
+    let web_port = match std::env::var("WEB_PORT") {
+        Ok(value) => value
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port != 0)
+            .ok_or_else(|| ArtifactError::Invalid("WEB_PORT must be a nonzero port".into()))?,
+        Err(std::env::VarError::NotPresent) => 5173,
+        Err(_) => {
+            return Err(ArtifactError::Invalid(
+                "WEB_PORT must be a nonzero port".into(),
+            ))
+        }
+    };
+    let state_dir = config.state_dir.clone();
+    let exposure = TailscaleArtifactExposure::new(
+        &config.state_dir,
+        tailscale,
+        Arc::new(SystemCommands),
+        Arc::new(move || {
+            state::settings::resolve(&state_dir, &|name| std::env::var(name).ok())
+                .map(|(settings, _)| settings.expose == state::settings::Expose::Tailnet)
+                .map_err(|_| {
+                    ArtifactError::Unavailable("remote access settings could not be read".into())
+                })
+        }),
+    )?;
+    ArtifactPreviews::new(ArtifactPreviewConfig {
+        source_roots,
+        broad_roots,
+        state_dir: config.state_dir.join("artifacts"),
+        allowed_parent_origins: parent_origins(config.port, web_port, remote)?,
+        clock: Arc::new(PreviewClock(Instant::now())),
+        entropy: Arc::new(PreviewEntropy),
+        exposure: Some(Arc::new(exposure)),
+    })
 }
 
 /// Creates the state directory (mode 0700 when created) and opens `relay.db` in it.
@@ -511,14 +606,17 @@ fn run_server(
     writes: Arc<Writes>,
     parked: Arc<ParkedQueue>,
     notifier: Option<Arc<Notifier>>,
-    dev: Arc<DevServers>,
+    previews: (Arc<DevServers>, Arc<ArtifactPreviews>),
     parent_gone: Option<oneshot::Receiver<()>>,
 ) -> anyhow::Result<()> {
+    let (dev, artifacts) = previews;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("could not start the async runtime")?;
     runtime.block_on(async {
+        // No control request can create a preview until stale/pending exposure is reconciled.
+        artifacts.reconcile_startup().await?;
         let address = SocketAddr::from(([127, 0, 0, 1], config.port));
         let listener = TcpListener::bind(address)
             .await
@@ -568,9 +666,29 @@ fn run_server(
             listener.local_addr()?,
             app_state.conductor.status().is_running()
         );
-        app::serve(listener, app_state, shutdown)
-            .await
-            .context("the server stopped")
+        let (stop_sweep, mut stopped) = oneshot::channel();
+        let sweeping = artifacts.clone();
+        let sweep = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(5));
+            loop {
+                tokio::select! {
+                    _ = &mut stopped => break,
+                    _ = tick.tick() => {
+                        if let Err(error) = sweeping.sweep().await {
+                            tracing::warn!("artifact cleanup will retry: {error}");
+                        }
+                    }
+                }
+            }
+        });
+        let served = app::serve(listener, app_state, shutdown).await;
+        let _ = stop_sweep.send(());
+        let swept = sweep.await;
+        // Await listener/session revocation and owned mapping cleanup even if serving failed.
+        let closed = artifacts.close_all().await;
+        served.context("the server stopped")?;
+        swept.context("the artifact sweeper stopped")?;
+        closed.context("artifact shutdown cleanup failed")
     })
 }
 

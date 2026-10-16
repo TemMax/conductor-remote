@@ -1,6 +1,7 @@
 //! Contracts and capability-scoped runtime for isolated HTML previews.
 
 mod controller;
+pub mod exposure;
 pub mod files;
 mod server;
 pub mod store;
