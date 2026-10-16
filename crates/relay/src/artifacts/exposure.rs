@@ -10,7 +10,10 @@ use crate::reads::extras::commands::{Commands, Limits};
 use crate::service::{CommandOutput, CommandRunner};
 
 use super::store::{ArtifactStore, LifecycleGuard};
-use super::{ArtifactError, ArtifactExposure, ArtifactExposurePermission, ArtifactExposureReceipt};
+use super::{
+    ArtifactError, ArtifactExposure, ArtifactExposurePermission, ArtifactExposureReceipt,
+    ArtifactParentOrigins,
+};
 
 fn unavailable(message: &str) -> ArtifactError {
     ArtifactError::Unavailable(message.into())
@@ -48,6 +51,90 @@ pub fn parent_origins(
         origins.insert(origin.to_owned());
     }
     Ok(origins)
+}
+
+/// Read-only discovery of the currently configured main HTTPS mappings.
+#[derive(Clone)]
+pub struct TailscaleArtifactParentOrigins {
+    relay_port: u16,
+    tailscale: Option<PathBuf>,
+    commands: Arc<dyn Commands>,
+}
+
+impl TailscaleArtifactParentOrigins {
+    pub fn new(relay_port: u16, tailscale: Option<PathBuf>, commands: Arc<dyn Commands>) -> Self {
+        Self {
+            relay_port,
+            tailscale,
+            commands,
+        }
+    }
+
+    fn read(&self) -> Result<BTreeSet<String>, ArtifactError> {
+        if self.relay_port == 0 {
+            return Err(ArtifactError::Invalid(
+                "main listener port is required".into(),
+            ));
+        }
+        let bin = self
+            .tailscale
+            .as_ref()
+            .ok_or_else(|| unavailable("tailscale is unavailable"))?;
+        let host = Tailscale::new(bin.clone(), self.commands.clone())
+            .host()
+            .ok_or_else(|| unavailable("main tailnet hostname could not be read"))?;
+        let base = format!("https://{host}");
+        let uri = super::controller::exact_origin(&base)?;
+        if uri.host() != Some(host.as_str()) || uri.port_u16().is_some() {
+            return Err(unavailable("main tailnet hostname is invalid"));
+        }
+        let output = self
+            .commands
+            .run(
+                &bin.to_string_lossy(),
+                &["serve", "status", "--json"],
+                None,
+                Limits {
+                    timeout: Duration::from_secs(15),
+                    max_stdout: 1024 * 1024,
+                },
+            )
+            .map_err(|_| unavailable("main serve status could not be read"))?;
+        if output.code != Some(0) {
+            return Err(unavailable("main serve status could not be read"));
+        }
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .map_err(|_| unavailable("main serve status could not be read"))?;
+        if !value.is_object() && !value.is_null() {
+            return Err(unavailable("main serve status could not be read"));
+        }
+        let target = format!("http://127.0.0.1:{}", self.relay_port);
+        let mut origins = BTreeSet::new();
+        for port in std::iter::once(443).chain(8443..=8450) {
+            // The general ServeStatus helper reduces Web entries to ports. Admission also
+            // needs the exact current Self hostname, so inspect that entry before trusting it.
+            let key = format!("{host}:{port}");
+            if value["TCP"][port.to_string()]["HTTPS"] == true
+                && value["Web"][&key]["Handlers"]["/"]["Proxy"].as_str() == Some(target.as_str())
+            {
+                let origin = if port == 443 {
+                    base.clone()
+                } else {
+                    format!("{base}:{port}")
+                };
+                super::controller::exact_origin(&origin)?;
+                origins.insert(origin);
+            }
+        }
+        Ok(origins)
+    }
+}
+
+impl ArtifactParentOrigins for TailscaleArtifactParentOrigins {
+    fn current(&self) -> BoxFuture<Result<BTreeSet<String>, ArtifactError>> {
+        let this = self.clone();
+        blocking(move || this.read())
+    }
 }
 
 /// Effective settings are resolved on every request and once more under the publication lock.

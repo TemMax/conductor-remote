@@ -9,7 +9,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use conductor_remote::artifacts::exposure::{parent_origins, TailscaleArtifactExposure};
+use conductor_remote::artifacts::exposure::{
+    parent_origins, TailscaleArtifactExposure, TailscaleArtifactParentOrigins,
+};
 use conductor_remote::artifacts::{
     ArtifactClock, ArtifactEntropy, ArtifactError, ArtifactPreviewConfig, ArtifactPreviews,
 };
@@ -535,14 +537,6 @@ fn production_artifacts(
     broad_roots: Vec<std::path::PathBuf>,
 ) -> Result<ArtifactPreviews, ArtifactError> {
     let tailscale = find_tailscale(|path| path.exists());
-    // Observe the actual main mapping; do not assume port 443 or trust Host/forwarded headers.
-    let main = tailnet::run(
-        TailnetAction::Status,
-        &SystemRunner,
-        tailscale.as_deref(),
-        config.port,
-    );
-    let remote = main.url.as_deref().map(|url| url.trim_end_matches('/'));
     let web_port = match std::env::var("WEB_PORT") {
         Ok(value) => value
             .parse::<u16>()
@@ -559,7 +553,7 @@ fn production_artifacts(
     let state_dir = config.state_dir.clone();
     let exposure = TailscaleArtifactExposure::new(
         &config.state_dir,
-        tailscale,
+        tailscale.clone(),
         Arc::new(SystemCommands),
         Arc::new(move || {
             state::settings::resolve(&state_dir, &|name| std::env::var(name).ok())
@@ -570,10 +564,16 @@ fn production_artifacts(
         }),
     )?;
     ArtifactPreviews::new(ArtifactPreviewConfig {
+        home: Some(state::home_dir()),
+        parent_origins: Some(Arc::new(TailscaleArtifactParentOrigins::new(
+            config.port,
+            tailscale,
+            Arc::new(SystemCommands),
+        ))),
         source_roots,
         broad_roots,
         state_dir: config.state_dir.join("artifacts"),
-        allowed_parent_origins: parent_origins(config.port, web_port, remote)?,
+        allowed_parent_origins: parent_origins(config.port, web_port, None)?,
         clock: Arc::new(PreviewClock(Instant::now())),
         entropy: Arc::new(PreviewEntropy),
         exposure: Some(Arc::new(exposure)),

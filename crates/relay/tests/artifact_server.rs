@@ -143,6 +143,8 @@ impl Fixture {
             collisions: AtomicUsize::new(0),
         });
         let config = ArtifactPreviewConfig {
+            home: None,
+            parent_origins: None,
             source_roots: vec![base.clone()],
             broad_roots: vec![base],
             state_dir,
@@ -1011,4 +1013,198 @@ async fn startup_reconciles_stale_pending_receipts_before_creates() {
     assert_eq!(new.origin, a.origin);
     assert!(new.id != a.id && new.grant != a.grant);
     restarted.close_all().await.unwrap();
+}
+
+#[tokio::test]
+async fn trusted_home_saved_file_keeps_full_source_resources_and_source_boundaries() {
+    let mut f = Fixture::new(false).await;
+    let html = format!(
+        "<!doctype html>\n{}<p>home final marker</p>",
+        "line\n".repeat(701)
+    );
+    f.write("index.html", &html);
+    f.write("nested/data.json", b"{\"home\":true}");
+    f.config.home = Some(f.root.parent().unwrap().to_owned());
+    // Home expansion is a resolution input, not an additional source root.
+    f.config.source_roots = vec![f.root.clone()];
+    f.manager = ArtifactPreviews::new(f.config.clone()).unwrap();
+    f.manager.reconcile_startup().await.unwrap();
+    let session = f
+        .manager
+        .create(CreateArtifactPreviewRequest::File {
+            reference: "~/project/index.html:702:1".into(),
+            parent_origin: "http://localhost:8790".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        f.manager.source(session.id.clone()).await.unwrap().content,
+        html
+    );
+    let cookie = f.cookie(&session).await;
+    let entry = f.get(&session, &session.entry_path, &cookie).await;
+    assert_eq!(entry.status(), 200);
+    assert!(entry.text().await.unwrap().contains("home final marker"));
+    assert_eq!(
+        f.get(&session, "/nested/data.json", &cookie)
+            .await
+            .text()
+            .await
+            .unwrap(),
+        "{\"home\":true}"
+    );
+    let outside = f.root.parent().unwrap().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("page.html"), "outside").unwrap();
+    for reference in ["~/outside/page.html", "~/project/../outside/page.html"] {
+        assert!(matches!(
+            f.manager
+                .create(CreateArtifactPreviewRequest::File {
+                    reference: reference.into(),
+                    parent_origin: "http://localhost:8790".into(),
+                })
+                .await,
+            Err(ArtifactError::Forbidden(_))
+        ));
+    }
+    assert_eq!(
+        f.get(&session, "/../outside/page.html", &cookie)
+            .await
+            .status(),
+        404
+    );
+    f.manager.close_all().await.unwrap();
+}
+
+#[derive(Default)]
+struct LiveParents {
+    origins: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    calls: AtomicUsize,
+}
+impl ArtifactParentOrigins for LiveParents {
+    fn current(&self) -> BoxFuture<Result<std::collections::BTreeSet<String>, ArtifactError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let origins = self.origins.lock().unwrap().clone();
+        Box::pin(async move { Ok(origins) })
+    }
+}
+
+#[tokio::test]
+async fn late_enabled_parent_is_admitted_and_csp_uses_only_live_validated_binding_parents() {
+    let mut f = Fixture::new(true).await;
+    let parents = Arc::new(LiveParents::default());
+    f.config
+        .allowed_parent_origins
+        .retain(|origin| origin.starts_with("http:"));
+    f.config.parent_origins = Some(parents.clone());
+    f.manager = ArtifactPreviews::new(f.config.clone()).unwrap();
+    f.manager.reconcile_startup().await.unwrap();
+    let local = f.inline("local").await;
+    assert_eq!(parents.calls.load(Ordering::SeqCst), 0);
+    let parent = "https://relay.example.test:8443";
+    let request = f.inline_request("late enabled", parent, false);
+    assert!(matches!(
+        f.manager.create(request.clone()).await,
+        Err(ArtifactError::Forbidden(_))
+    ));
+    parents.origins.lock().unwrap().insert(parent.into());
+    let session = f.manager.create(request.clone()).await.unwrap();
+    let bootstrap_path = session.bootstrap_url.strip_prefix(&session.origin).unwrap();
+    let bootstrap = remote_request(&f, &session, bootstrap_path, None, false).await;
+    assert_eq!(bootstrap.status(), 200);
+    let policy = bootstrap.headers()["content-security-policy"]
+        .to_str()
+        .unwrap();
+    assert!(policy.contains(parent), "{policy}");
+    assert!(policy.contains("http://localhost:8790"));
+    let script = bootstrap.text().await.unwrap();
+    assert!(script.contains(parent));
+    assert!(!script.contains(&session.grant));
+    for untrusted in [
+        "https://relay.example.test",
+        "https://relay.example.test:8444",
+        "https://relay.example.test.evil:8443",
+        "http://relay.example.test:8443",
+        "http://localhost:9999",
+    ] {
+        assert!(f
+            .manager
+            .create(f.inline_request("untrusted", untrusted, false))
+            .await
+            .is_err());
+    }
+    // Several admitted main origins can share the same artifact lease; closing the
+    // second viewer must retire only its live CSP parent.
+    let other_parent = "https://relay.example.test:8444";
+    parents.origins.lock().unwrap().insert(other_parent.into());
+    let other = f
+        .manager
+        .create(f.inline_request("late enabled", other_parent, false))
+        .await
+        .unwrap();
+    assert_eq!(other.origin, session.origin);
+    let shared = remote_request(&f, &session, bootstrap_path, None, false).await;
+    assert!(shared.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .contains(other_parent));
+    f.manager.close(other.id).await.unwrap();
+    parents.origins.lock().unwrap().remove(other_parent);
+    // A provider is still subject to canonical-origin validation at admission.
+    let calls = parents.calls.load(Ordering::SeqCst);
+    parents
+        .origins
+        .lock()
+        .unwrap()
+        .insert("https://relay.example.test:8443/path".into());
+    assert!(f
+        .manager
+        .create(f.inline_request("untrusted", "https://relay.example.test:8443/path", false))
+        .await
+        .is_err());
+    assert_eq!(parents.calls.load(Ordering::SeqCst), calls);
+    let auth = remote_request(&f, &session, "/__conductor_preview/authorize", None, true).await;
+    assert_eq!(auth.status(), 200);
+    let cookie = auth.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let entry = remote_request(&f, &session, &session.entry_path, Some(&cookie), false).await;
+    assert_eq!(entry.status(), 200);
+    assert_eq!(
+        entry.headers()["content-security-policy"],
+        format!(
+            "frame-ancestors {}; sandbox allow-scripts allow-same-origin",
+            f.config
+                .allowed_parent_origins
+                .iter()
+                .cloned()
+                .chain([parent.to_owned()])
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    );
+    let local_cookie = f.cookie(&local).await;
+    let local_entry = f.get(&local, &local.entry_path, &local_cookie).await;
+    assert!(!local_entry.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .contains(parent));
+    // Discovery is current on each create; removing a mapping stops new admission.
+    parents.origins.lock().unwrap().clear();
+    assert!(matches!(
+        f.manager.create(request.clone()).await,
+        Err(ArtifactError::Forbidden(_))
+    ));
+    parents.origins.lock().unwrap().insert(parent.into());
+    f.exposure.store.lock().unwrap().revoke_remote().unwrap();
+    assert!(f.manager.create(request).await.is_err());
+    assert!(f.manager.source(session.id).await.is_err());
+    assert!(f.manager.source(local.id).await.is_ok());
+    f.manager.close_all().await.unwrap();
 }

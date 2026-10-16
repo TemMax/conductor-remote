@@ -154,10 +154,17 @@ pub trait ArtifactExposure: Send + Sync + 'static {
     fn reconcile_startup(&self) -> BoxFuture<Result<(), ArtifactError>>;
 }
 
+/// Trusted host discovery of current exact main-app origins; never request-header derived.
+pub trait ArtifactParentOrigins: Send + Sync + 'static {
+    fn current(&self) -> BoxFuture<Result<BTreeSet<String>, ArtifactError>>;
+}
+
 /// Owned inputs for `ArtifactPreviews::new(config) -> Result<Self, ArtifactError>`.
 /// Construction validates these inputs; it never executes project commands.
 #[derive(Clone)]
 pub struct ArtifactPreviewConfig {
+    /// Trusted home for saved `~/` references; source-root authorization still applies.
+    pub home: Option<PathBuf>,
     /// Canonical directories permitted by the relay's current source-read policy.
     pub source_roots: Vec<PathBuf>,
     /// Canonical home/workspaces roots which must never themselves be served as preview roots.
@@ -167,6 +174,8 @@ pub struct ArtifactPreviewConfig {
     /// Exact canonical HTTP(S) main-app origins, including explicit scheme and port.
     /// Supplies local relay/Vite and configured tailnet origins; never inferred from Host headers.
     pub allowed_parent_origins: BTreeSet<String>,
+    /// Consulted only for canonical HTTPS parents absent from the static set.
+    pub parent_origins: Option<Arc<dyn ArtifactParentOrigins>>,
     pub clock: Arc<dyn ArtifactClock>,
     pub entropy: Arc<dyn ArtifactEntropy>,
     /// `None` supports local previews only.

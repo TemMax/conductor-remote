@@ -89,13 +89,20 @@ async fn route(State(listener): State<ListenerState>, request: Request) -> Respo
         "permissions-policy",
         HeaderValue::from_static("document-domain=()"),
     );
-    let parents = inner
-        .config
-        .allowed_parent_origins
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let parents = {
+        let state = inner.state.lock().await;
+        let mut parents = inner.config.allowed_parent_origins.clone();
+        // Every session parent passed canonical parsing and exact host admission at create.
+        // Include only live viewers of this binding, never request Host/forwarded headers.
+        parents.extend(
+            state
+                .sessions
+                .values()
+                .filter(|session| session.binding_id == listener.binding)
+                .map(|session| session.parent.clone()),
+        );
+        parents.into_iter().collect::<Vec<_>>().join(" ")
+    };
     // This sandbox also protects direct navigation, outside the main app's iframe attributes.
     let policy = format!("frame-ancestors {parents}; sandbox allow-scripts allow-same-origin");
     if let Ok(value) = HeaderValue::from_str(&policy) {

@@ -321,6 +321,8 @@ impl ArtifactEntropy for Entropy {
 }
 async fn manager(state: &Path, fake: Arc<Fake>) -> ArtifactPreviews {
     let runtime = ArtifactPreviews::new(ArtifactPreviewConfig {
+        home: None,
+        parent_origins: None,
         source_roots: vec![state.to_owned()],
         broad_roots: vec![state.to_owned()],
         state_dir: state.join("artifacts"),
@@ -613,4 +615,263 @@ async fn failed_off_blocks_remote_http_immediately_and_local_previews_remain_ava
     runtime.sweep().await.unwrap();
     assert!(store(dir.path()).snapshot().unwrap().receipts.is_empty());
     runtime.close_all().await.unwrap();
+}
+
+// Mutable, synthetic status for read-only parent discovery. Never invokes Tailscale.
+struct ParentCommands {
+    host: Mutex<String>,
+    status: Mutex<serde_json::Value>,
+    fail: Mutex<bool>,
+    calls: Mutex<Vec<Vec<String>>>,
+}
+impl Default for ParentCommands {
+    fn default() -> Self {
+        Self {
+            host: Mutex::new("mac.example.ts.net.".into()),
+            status: Mutex::new(json!({})),
+            fail: Mutex::new(false),
+            calls: Mutex::default(),
+        }
+    }
+}
+impl Commands for ParentCommands {
+    fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        cwd: Option<&Path>,
+        limits: Limits,
+    ) -> Result<Output, CommandError> {
+        assert_eq!(program, "/test/tailscale");
+        assert!(cwd.is_none());
+        assert_eq!(limits.timeout, Duration::from_secs(15));
+        assert_eq!(limits.max_stdout, 1024 * 1024);
+        self.calls
+            .lock()
+            .unwrap()
+            .push(args.iter().map(|arg| (*arg).into()).collect());
+        let value = match args {
+            ["status", "--json"] => json!({"Self":{"DNSName":*self.host.lock().unwrap()}}),
+            ["serve", "status", "--json"] => self.status.lock().unwrap().clone(),
+            _ => panic!("parent discovery must be read-only"),
+        };
+        Ok(Output {
+            code: Some(if *self.fail.lock().unwrap() { 1 } else { 0 }),
+            stdout: value.to_string().into_bytes(),
+            stderr: b"synthetic-private-output".to_vec(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn live_main_origins_require_exact_host_root_target_https_and_supported_port() {
+    use conductor_remote::artifacts::exposure::TailscaleArtifactParentOrigins;
+    let commands = Arc::new(ParentCommands::default());
+    let parents =
+        TailscaleArtifactParentOrigins::new(8790, Some("/test/tailscale".into()), commands.clone());
+    assert!(parents.current().await.unwrap().is_empty());
+    let mut tcp = serde_json::Map::new();
+    let mut web = serde_json::Map::new();
+    // Every supported main port works; dev/preview/arbitrary ports remain excluded even
+    // when their root target happens to be the relay.
+    for port in [
+        443, 8443, 8444, 8445, 8446, 8447, 8448, 8449, 8450, 8442, 8451, 23000, 30000,
+    ] {
+        tcp.insert(port.to_string(), json!({"HTTPS":true}));
+        web.insert(
+            format!("mac.example.ts.net:{port}"),
+            json!({"Handlers":{"/":{"Proxy":"http://127.0.0.1:8790"}}}),
+        );
+    }
+    *commands.status.lock().unwrap() = json!({"TCP":tcp,"Web":web});
+    let origins = parents.current().await.unwrap();
+    assert_eq!(origins.len(), 9);
+    assert!(origins.contains("https://mac.example.ts.net"));
+    for port in 8443..=8450 {
+        assert!(origins.contains(&format!("https://mac.example.ts.net:{port}")));
+    }
+    for (host, port, target, path, https) in [
+        (
+            "mac.example.ts.net.evil",
+            8443,
+            "http://127.0.0.1:8790",
+            "/",
+            true,
+        ),
+        (
+            "other.example.ts.net",
+            8443,
+            "http://127.0.0.1:8790",
+            "/",
+            true,
+        ),
+        (
+            "mac.example.ts.net",
+            8443,
+            "http://127.0.0.1:8791",
+            "/",
+            true,
+        ),
+        (
+            "mac.example.ts.net",
+            8443,
+            "http://localhost:8790",
+            "/",
+            true,
+        ),
+        (
+            "mac.example.ts.net",
+            8443,
+            "http://127.0.0.1:8790/",
+            "/",
+            true,
+        ),
+        (
+            "mac.example.ts.net",
+            8443,
+            "http://127.0.0.1:8790",
+            "/nested",
+            true,
+        ),
+        (
+            "mac.example.ts.net",
+            8443,
+            "http://127.0.0.1:8790",
+            "/",
+            false,
+        ),
+    ] {
+        *commands.status.lock().unwrap() = json!({"TCP":{port.to_string():{"HTTPS":https}},"Web":{format!("{host}:{port}"):{"Handlers":{path:{"Proxy":target}}}}});
+        assert!(
+            parents.current().await.unwrap().is_empty(),
+            "{host}:{port} {path} {target}"
+        );
+    }
+    *commands.status.lock().unwrap() = json!({"TCP":{"8443":{"HTTPS":true}},"Web":{"mac.example.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8790"}}}}});
+    assert_eq!(
+        parents.current().await.unwrap(),
+        ["https://mac.example.ts.net:8443".into()].into()
+    );
+    *commands.host.lock().unwrap() = "renamed.example.ts.net.".into();
+    assert!(parents.current().await.unwrap().is_empty());
+    *commands.fail.lock().unwrap() = true;
+    assert!(!parents
+        .current()
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("synthetic-private-output"));
+    *commands.fail.lock().unwrap() = false;
+    *commands.host.lock().unwrap() = "mac.example.ts.net/path".into();
+    assert!(parents.current().await.is_err());
+    *commands.host.lock().unwrap() = "mac.example.ts.net:8443".into();
+    assert!(parents.current().await.is_err());
+    *commands.host.lock().unwrap() = "mac.example.ts.net.".into();
+    *commands.status.lock().unwrap() = json!("unreadable status shape");
+    assert!(parents.current().await.is_err());
+    let absent = TailscaleArtifactParentOrigins::new(8790, None, commands);
+    assert!(absent.current().await.is_err());
+}
+
+#[tokio::test]
+async fn main_mapping_enabled_after_manager_start_is_discovered_and_off_still_revokes() {
+    use conductor_remote::artifacts::exposure::TailscaleArtifactParentOrigins;
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Arc::new(Fake::default());
+    conductor_remote::state::settings::set(dir.path(), "EXPOSE", "off").unwrap();
+    let runtime = ArtifactPreviews::new(ArtifactPreviewConfig {
+        home: None,
+        parent_origins: Some(Arc::new(TailscaleArtifactParentOrigins::new(
+            8790,
+            Some("/test/tailscale".into()),
+            fake.clone(),
+        ))),
+        source_roots: vec![dir.path().to_owned()],
+        broad_roots: vec![dir.path().to_owned()],
+        state_dir: dir.path().join("artifacts"),
+        allowed_parent_origins: parent_origins(8790, 5173, None).unwrap(),
+        clock: Arc::new(Clock(std::time::Instant::now())),
+        entropy: Arc::new(Entropy),
+        exposure: Some(Arc::new(adapter(dir.path(), fake.clone()))),
+    })
+    .unwrap();
+    runtime.reconcile_startup().await.unwrap();
+    let local = runtime.create(html("http://localhost:5173")).await.unwrap();
+    assert!(fake.calls.lock().unwrap().is_empty());
+    assert!(runtime
+        .create(html("https://mac.example.ts.net"))
+        .await
+        .is_err());
+    let enabled = off(dir.path(), &fake, tailnet::TailnetAction::Enable);
+    assert!(enabled.error.is_none(), "{enabled:?}");
+    let remote = runtime
+        .create(html("https://mac.example.ts.net"))
+        .await
+        .unwrap();
+    assert!(remote.origin.starts_with("https://mac.example.ts.net:3"));
+    // The main mapping moves, without restarting the relay.
+    fake.mappings.lock().unwrap().remove(&443);
+    fake.mappings
+        .lock()
+        .unwrap()
+        .insert(8443, "http://127.0.0.1:8790".into());
+    assert!(matches!(
+        runtime.create(html("https://mac.example.ts.net")).await,
+        Err(ArtifactError::Forbidden(_))
+    ));
+    let moved = runtime
+        .create(html("https://mac.example.ts.net:8443"))
+        .await
+        .unwrap();
+    assert_eq!(remote.origin, moved.origin);
+    assert!(off(dir.path(), &fake, tailnet::TailnetAction::Off)
+        .error
+        .is_none());
+    assert!(runtime.source(remote.id).await.is_err());
+    assert!(runtime.source(moved.id).await.is_err());
+    assert!(runtime.source(local.id).await.is_ok());
+    assert!(runtime
+        .create(html("https://mac.example.ts.net:8443"))
+        .await
+        .is_err());
+    runtime.close_all().await.unwrap();
+    assert!(store(dir.path()).snapshot().unwrap().receipts.is_empty());
+}
+
+#[tokio::test]
+async fn missing_or_unreadable_tailscale_does_not_query_or_block_local_preview() {
+    use conductor_remote::artifacts::exposure::TailscaleArtifactParentOrigins;
+    for binary in [None, Some("/test/tailscale".into())] {
+        let dir = tempfile::tempdir().unwrap();
+        let commands = Arc::new(ParentCommands::default());
+        *commands.fail.lock().unwrap() = true;
+        let runtime = ArtifactPreviews::new(ArtifactPreviewConfig {
+            home: None,
+            source_roots: vec![dir.path().to_owned()],
+            broad_roots: vec![dir.path().to_owned()],
+            state_dir: dir.path().join("artifacts"),
+            allowed_parent_origins: parent_origins(8790, 5173, None).unwrap(),
+            parent_origins: Some(Arc::new(TailscaleArtifactParentOrigins::new(
+                8790,
+                binary,
+                commands.clone(),
+            ))),
+            clock: Arc::new(Clock(std::time::Instant::now())),
+            entropy: Arc::new(Entropy),
+            exposure: None,
+        })
+        .unwrap();
+        runtime.reconcile_startup().await.unwrap();
+        let local = runtime.create(html("http://127.0.0.1:8790")).await.unwrap();
+        assert!(commands.calls.lock().unwrap().is_empty());
+        assert_eq!(
+            runtime.source(local.id).await.unwrap().content,
+            "<!doctype html><p>preview</p>"
+        );
+        assert!(runtime
+            .create(html("https://mac.example.ts.net"))
+            .await
+            .is_err());
+        runtime.close_all().await.unwrap();
+    }
 }

@@ -253,6 +253,8 @@ async fn environment_service_exposure_and_lifecycle_are_object_safe_and_injectab
     let root = directory.path().canonicalize().unwrap();
     let exposure = Arc::new(Exposure::default());
     let config = ArtifactPreviewConfig {
+        home: None,
+        parent_origins: None,
         source_roots: vec![root.clone()],
         broad_roots: vec![root.clone()],
         state_dir: root.join("state"),

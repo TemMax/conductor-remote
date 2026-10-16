@@ -240,14 +240,25 @@ impl Inner {
             | CreateArtifactPreviewRequest::Html { parent_origin, .. } => parent_origin.clone(),
         };
         let uri = exact_origin(&parent)?;
-        if !self.config.allowed_parent_origins.contains(&parent) {
+        let remote = uri.scheme_str() == Some("https");
+        let permitted = self.config.allowed_parent_origins.contains(&parent)
+            || if remote {
+                match &self.config.parent_origins {
+                    Some(provider) => provider.current().await?.contains(&parent),
+                    None => false,
+                }
+            } else {
+                false
+            };
+        if !permitted {
             return Err(ArtifactError::Forbidden(
                 "parent origin is not permitted".into(),
             ));
         }
-        let remote = uri.scheme_str() == Some("https");
         let host = uri.host().ok_or_else(unavailable)?.to_owned();
-        let document = Arc::new(prepare_document(self.policy.clone(), request, None).await?);
+        let document = Arc::new(
+            prepare_document(self.policy.clone(), request, self.config.home.clone()).await?,
+        );
         let mut state = self.state.lock().await;
         if !state.ready {
             return Err(ArtifactError::Unavailable(
