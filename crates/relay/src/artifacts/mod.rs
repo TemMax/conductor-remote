@@ -3,6 +3,9 @@
 //! The runtime will provide `ArtifactPreviews::new(config: ArtifactPreviewConfig)
 //! -> Result<Self, ArtifactError>` and implement both service and lifecycle traits below.
 
+pub mod files;
+pub mod store;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;

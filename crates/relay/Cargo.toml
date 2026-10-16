@@ -21,6 +21,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 flate2 = "1.1.10"
 getrandom = "0.4.3"
 hkdf = "0.12.4"
+libc = "=0.2.190"
 mime_guess = "2.0.5"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication", "libc"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString", "CFArray", "CFDictionary", "CFNumber", "CFBundle"] }

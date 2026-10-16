@@ -312,6 +312,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hkdf",
  "http-body-util",
+ "libc",
  "mime_guess",
  "objc2-app-kit",
  "objc2-core-foundation",
