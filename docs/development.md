@@ -64,6 +64,111 @@ The file routes read only inside the preview roots, judged by real paths, so a l
 
 Without preview settings (a `Reads` built without `with_preview`) the two file routes answer 404.
 
+### HTML artifact previews
+
+Saved `.html` and `.htm` chat links, file mentions and attachments open the shared
+HTML viewer in Preview. A `:line[:column]` reference starts in Code and highlights
+the requested line; it never clips the executable document. Raw `html` and `htm`
+code fences offer a lazy Preview button. Review's All-files view uses the same
+viewer and retains previous/next file navigation. Changes remains a diff;
+non-HTML source, rendered Markdown and raster image viewers retain their existing
+behavior.
+
+Code and Copy use the full original HTML, including documents longer than 500
+lines. Preview preserves the document's DOCTYPE and encoding metadata and adds an
+external diagnostics script before artifact scripts. Switching between Code and
+Preview keeps the frame alive. Refresh replaces the session and reloads current
+document/resources; there is no periodic reload. Diagnostics show bounded
+JavaScript errors, rejected promises, resource load errors and static HTTP
+failures. A document's own content security policy is preserved: if it blocks
+instrumentation, the viewer reports that diagnostics have not connected rather
+than claiming the page has no errors.
+
+The main relay exposes these control routes behind its existing Bearer gate;
+responses are `no-store`:
+
+| Method and route | Request / response |
+| --- | --- |
+| `POST /api/artifact-previews` | `{kind:"file", reference, parentOrigin}` or `{kind:"html", html, baseDirectory?, parentOrigin}`. Returns `{id, origin, bootstrapUrl, entryPath, grant, expiresAt, path}`; `path` is null for inline HTML. |
+| `GET /api/artifact-previews/:id/source` | `{path, content}` containing the full original document, without diagnostics injection or line clipping. |
+| `DELETE /api/artifact-previews/:id` | Closes that control session; returns `{ok:true}`. |
+
+Invalid input answers 400, forbidden paths/origins 403, missing or expired sessions
+404, oversized input 413, unsupported source 415, and unavailable service or
+exhausted capacity 503. HTML must be UTF-8 and is limited to 8 MiB; inline creation
+also fits within the existing 1 MiB JSON request limit. Each static resource is
+limited to 32 MiB. These limits are separate from the older bounded source-preview
+route's 512 KiB/500-line excerpt.
+
+A saved file must satisfy the relay's source-root policy. Its canonical parent
+directory becomes the narrower resource root. Inline HTML uses its authorized
+canonical `baseDirectory` (the current workspace in chat), or an empty virtual
+root when none is available. `/images/picture.png` resolves within that selected
+root, not at the Mac's filesystem root. Nested relative paths work within the
+root; dependencies using `../` to escape it are refused. Move the HTML and its
+dependencies into one suitable directory rather than expanding the root.
+Selecting the entire configured home or workspaces root is refused. There are no
+directory listings or arbitrary filesystem reads: traversal, symlinks, protected
+directories such as `.git` and credential directories, `.env` variants, keys,
+certificates and private archives are blocked. Safe `.context` artifact paths are
+supported. Resource requests use GET/HEAD, MIME types, `nosniff`, `no-store` and
+byte ranges for media.
+
+The browser receives a full document at its natural entry path, so CSS imports,
+images, fonts, local JSON fetches, ES modules and dynamic imports, dedicated
+workers, media and WASM use normal browser loading. Public HTTPS CDN resources
+and external APIs remain subject to the document's CSP, HTTPS/mixed-content rules,
+CORS, browser permissions and iframe sandbox restrictions. The relay does not
+proxy external requests to bypass those rules. Persistent service workers are
+disabled; top-level navigation and unsolicited windows are blocked. A preview
+serves existing files only: it does not install packages, compile JSX/TypeScript,
+resolve bare package imports or start a backend. Build the project first and open
+its generated HTML with the needed output files, or use the existing Run task for
+an application that needs a development server or backend.
+
+Each artifact identity has a dedicated listener and browser origin, separate from
+the main app. Local HTTP previews preserve the parent's `localhost` or
+`127.0.0.1` hostname and use another port; these hostnames are distinct. Remote
+previews use the configured Tailscale HTTPS hostname on ports 30000–39999,
+separate from Run previews and the main relay. Only exact configured main-app
+origins are admitted, including local relay and Vite origins; custom `WEB_PORT`
+must match in the relay and Vite development processes (default 5173).
+
+On the preview origin, `GET /__conductor_preview/bootstrap?session=:id` provides
+the trusted bootstrap. The parent validates origin, frame window, protocol and
+session before sending a one-use grant to that exact origin. Bootstrap exchanges
+it with `POST /__conductor_preview/authorize` and navigates to `entryPath`.
+The grant expires after 30 seconds. The iframe never receives the main Bearer
+token; preview cookies cannot authenticate main API requests, and a main Bearer
+does not authorize artifact resources. The preview cannot read the parent's DOM
+or origin storage. Its listener accepts only its own random cookie name/value:
+HttpOnly, host-only, Path=/, SameSite=Strict, with Secure on HTTPS and a bounded
+30-minute Max-Age. Cookies travel across ports on the same hostname, so other
+same-host HTTP servers remain part of the trusted Mac environment; separate ports
+isolate browser origins, not cookie transmission.
+
+There are at most 16 active control sessions, with a 30-minute idle expiry.
+Closing the viewer, leaving the page, switching file/workspace, expiry or relay
+restart invalidates the owned session; Refresh reopens an expired viewer.
+Simultaneous viewers of the same artifact share a listener/auth lease with
+separate grants and control IDs, so closing one leaves the others usable. Final
+close or expiry revokes the lease; reopening rotates its cookie value. Reserved
+origins are never assigned to a different artifact identity, even after restart.
+Restart does not restore sessions or grants. Turning Remote access off removes
+only preview-owned HTTPS forwards and rejects remote previews while local
+previews and unrelated mappings remain available.
+
+`cargo test -p conductor-remote --test artifact_e2e` exercises the production
+router, concrete service and real loopback HTTP with synthetic documents and
+dependencies. `bun run --cwd web test -- tests/artifacts` checks viewer branches,
+client wiring, message validation and lifecycle logic. Neither proves browser
+execution. A live pass must check interactive rendering beyond line 500, actual
+font/image/module/worker/WASM loading, CDN execution and CORS failures, diagnostics,
+Refresh, iframe cookie bootstrap and origin isolation. Check chat draft/read
+position and Review navigation, close/switch/reopen/restart and Remote access off
+against a running relay. Verify scrolling and controls in Safari/WebKit and on a
+physical phone/PWA; desktop markup or a narrow viewport is not a phone pass.
+
 ### Search and usage
 
 Three more read routes. All are `GET`, need the token and answer 503 `Conductor is not running` while Conductor is not running; each runs on the blocking pool.
