@@ -615,8 +615,13 @@ fn run_server(
         .build()
         .context("could not start the async runtime")?;
     runtime.block_on(async {
-        // No control request can create a preview until stale/pending exposure is reconciled.
-        artifacts.reconcile_startup().await?;
+        // Failed cleanup gates all preview creates, while the authenticated main relay stays
+        // available. The artifact sweeper retries reconciliation before enabling previews.
+        if let Err(error) = artifacts.reconcile_startup().await {
+            tracing::warn!(
+                "artifact startup cleanup will retry; previews are unavailable: {error}"
+            );
+        }
         let address = SocketAddr::from(([127, 0, 0, 1], config.port));
         let listener = TcpListener::bind(address)
             .await
@@ -717,4 +722,118 @@ fn shutdown_signal(
             }
         }
     })
+}
+
+#[cfg(test)]
+#[path = "../tests/artifact_startup.rs"]
+mod artifact_startup;
+
+#[cfg(test)]
+mod artifact_main_tests {
+    use super::*;
+    use conductor_remote::testing::FakeCommands;
+    use conductor_remote::ui::driver::{Target, UiDriver, UiError, ViewReport};
+
+    struct NoDesktop;
+    impl UiDriver for NoDesktop {
+        fn trusted(&self) -> bool {
+            false
+        }
+        fn send_prompt(&mut self, _: &Target, _: &str, _: bool) -> Result<u32, UiError> {
+            panic!("no desktop operations in startup test")
+        }
+        fn stop_turn(&mut self, _: &Target) -> Result<(), UiError> {
+            panic!("no desktop operations in startup test")
+        }
+        fn new_chat(&mut self, _: &Target) -> Result<(), UiError> {
+            panic!("no desktop operations in startup test")
+        }
+        fn locate(&mut self) -> Result<ViewReport, UiError> {
+            panic!("no desktop operations in startup test")
+        }
+        fn open_link(&mut self, _: &str) -> Result<(), UiError> {
+            panic!("no desktop operations in startup test")
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_artifact_startup_keeps_real_main_api_available_and_maintenance_recovers() {
+        let _listeners = artifact_startup::LISTENERS.lock().await;
+        let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = reserved.local_addr().unwrap().port();
+        let f = Arc::new(artifact_startup::Fixture::new(format!(
+            "http://127.0.0.1:{port}"
+        )));
+        let config = Config {
+            port,
+            state_dir: f.temp.path().join("main-state"),
+        };
+        let app_state = f.state();
+        let artifacts = f.manager.clone();
+        let reads = Arc::new(Reads::new(
+            Arc::new(ConductorDb::new(f.temp.path().join("unused-synthetic.db"))),
+            f.temp.path(),
+        ));
+        let ui = UiActor::spawn(|| Box::new(NoDesktop));
+        let parked = ParkedQueue::new(
+            Arc::new(Store::open_in_memory().unwrap()),
+            Arc::new(|| Some(true)),
+            ParkedTimings::default(),
+        );
+        let writes = Arc::new(Writes::new(
+            reads.clone(),
+            ui.clone(),
+            Arc::new(|| false),
+            WriteTimings::default(),
+            parked.clone(),
+        ));
+        let dev = DevServers::new(DevDeps {
+            reads,
+            ui,
+            commands: Arc::new(FakeCommands::new()),
+            home: f.temp.path().into(),
+            state_dir: config.state_dir.clone(),
+            tailscale: None,
+        });
+        let (shutdown, stopped) = oneshot::channel();
+        drop(reserved);
+        let server = tokio::task::spawn_blocking(move || {
+            run_server(
+                config,
+                app_state,
+                writes,
+                parked,
+                None,
+                (dev, artifacts),
+                Some(stopped),
+            )
+        });
+        // Catch assertion failures in a joined task so shutdown and the server are always awaited.
+        let checks = tokio::spawn(artifact_startup::main_api_checks(f.clone())).await;
+        let _ = shutdown.send(());
+        let served = server.await.unwrap();
+        let session = checks.unwrap();
+        served.unwrap();
+        assert!(f.client.get(&session.bootstrap_url).send().await.is_err());
+        assert!(conductor_remote::artifacts::ArtifactPreviewService::source(
+            f.manager.as_ref(),
+            session.id,
+        )
+        .await
+        .is_err());
+        assert!(f.store.snapshot().unwrap().receipts.is_empty());
+        assert!(f
+            .store
+            .snapshot()
+            .unwrap()
+            .bindings
+            .iter()
+            .all(|binding| binding.tombstoned));
+        assert!(f
+            .client
+            .get(format!("{}/api/state", f.parent))
+            .send()
+            .await
+            .is_err());
+    }
 }

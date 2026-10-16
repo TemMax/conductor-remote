@@ -151,11 +151,13 @@ impl ArtifactPreviews {
     }
 
     pub async fn sweep(&self) -> Result<(), ArtifactError> {
+        self.reconcile_startup().await?;
         let mut state = self.inner.state.lock().await;
         self.inner.prune(&mut state).await
     }
 
     pub async fn close_all(&self) -> Result<(), ArtifactError> {
+        self.reconcile_startup().await?;
         let mut state = self.inner.state.lock().await;
         state.sessions.clear();
         self.inner.prune(&mut state).await
