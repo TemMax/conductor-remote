@@ -26,7 +26,6 @@ export function useArtifactPreview(target: ArtifactTarget) {
 		setSourceError(null)
 		setDiagnostics([])
 		setPhase('creating')
-		let expiry: number | undefined
 		const lifecycle = startArtifact(
 			client,
 			kind === 'file' ? { kind, reference } : { kind, html, baseDirectory },
@@ -34,21 +33,14 @@ export function useArtifactPreview(target: ArtifactTarget) {
 			value => {
 				setSession(value)
 				setPhase('bootstrap')
-				expiry = window.setTimeout(
-					() => {
-						void lifecycle.dispose()
-						setSession(null)
-						setError('This preview session has expired. Refresh to reopen it.')
-					},
-					Math.max(0, Math.min(Date.parse(value.expiresAt) - Date.now(), 2_147_483_647))
-				)
 			},
 			setSource,
 			setError,
 			setSourceError
 		)
+		// Resource requests renew the relay's idle deadline. The initial expiresAt
+		// is only an estimate; ownership ends here on close, Refresh or pagehide.
 		const leavePage = () => {
-			window.clearTimeout(expiry)
 			void lifecycle.dispose()
 			setSession(null)
 		}
@@ -58,7 +50,6 @@ export function useArtifactPreview(target: ArtifactTarget) {
 		window.addEventListener('pagehide', leavePage)
 		window.addEventListener('pageshow', restorePage)
 		return () => {
-			window.clearTimeout(expiry)
 			window.removeEventListener('pagehide', leavePage)
 			window.removeEventListener('pageshow', restorePage)
 			void lifecycle.dispose()
