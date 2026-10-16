@@ -99,6 +99,7 @@ fn protected(name: &OsStr) -> bool {
     matches!(
         name.as_str(),
         ".git"
+            | ".local"
             | ".ssh"
             | ".aws"
             | ".azure"

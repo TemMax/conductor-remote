@@ -272,6 +272,53 @@ fn protected_paths_traversal_decoding_and_types_are_refused() {
 }
 
 #[test]
+fn private_local_directories_cannot_be_previewed_or_served() {
+    let fixture = Fixture::new();
+    fixture.write("index.html", "<p>artifact</p>");
+    fixture.write(".local/private.txt", "synthetic private marker");
+    fixture.write(".local/page.html", "<p>private artifact</p>");
+    fixture.write("assets/.LOCAL/private.txt", "nested private marker");
+    fixture.write(".context/safe.json", r#"{"safe":true}"#);
+    let document = fixture.document();
+
+    for path in [
+        "/.local/private.txt",
+        "/%2elocal/private.txt",
+        "/assets/.LOCAL/private.txt",
+    ] {
+        assert!(
+            matches!(
+                document.root.read_resource_blocking(path, None, false),
+                Err(ArtifactError::Forbidden(_))
+            ),
+            "{path}"
+        );
+    }
+    assert!(matches!(
+        fixture.policy.prepare_file(
+            fixture.project().join(".local/page.html").to_str().unwrap(),
+            None
+        ),
+        Err(ArtifactError::Forbidden(_))
+    ));
+    assert!(matches!(
+        fixture.policy.prepare_inline(
+            "<p>inline</p>".into(),
+            Some(&fixture.project().join(".local"))
+        ),
+        Err(ArtifactError::Forbidden(_))
+    ));
+    assert_eq!(
+        document
+            .root
+            .read_resource_blocking("/.context/safe.json", None, false)
+            .unwrap()
+            .body,
+        br#"{"safe":true}"#
+    );
+}
+
+#[test]
 fn pinned_directory_survives_ancestor_replacement_and_rejects_component_links() {
     let fixture = Fixture::new();
     fixture.write("index.html", "original");
